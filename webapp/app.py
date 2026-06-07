@@ -58,13 +58,63 @@ def get_hostname():
     return socket.gethostname()
 
 
+def get_mdns_name():
+    """
+    Return the avahi-advertised mDNS name (e.g. "nucleus-server.local").
+
+    avahi-daemon uses the system hostname by default, but this can be
+    overridden with a `host-name=` entry in /etc/avahi/avahi-daemon.conf.
+    We honour that override when present, otherwise fall back to the
+    system hostname.
+    """
+    name = get_hostname()
+    try:
+        with open("/etc/avahi/avahi-daemon.conf", "r") as fh:
+            for line in fh:
+                stripped = line.strip()
+                # Skip comments (lines starting with '#') and blanks.
+                if not stripped or stripped.startswith("#"):
+                    continue
+                if stripped.startswith("host-name") and "=" in stripped:
+                    value = stripped.split("=", 1)[1].strip()
+                    if value:
+                        name = value
+                    break
+    except OSError:
+        # Config not present/readable - fall back to the system hostname.
+        pass
+    return f"{name}.local"
+
+
+def get_takserver_status():
+    """
+    Return "Running" if the takserver service is active, otherwise "Stopped".
+
+    Uses `systemctl is-active takserver` (read-only, no root required).
+    """
+    try:
+        out = subprocess.run(
+            ["systemctl", "is-active", "takserver"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        return "Running" if out.stdout.strip() == "active" else "Stopped"
+    except Exception:  # noqa: BLE001 - any failure means we can't confirm it's up
+        return "Stopped"
+
+
 @app.route("/")
 def index():
     return render_template(
         "index.html",
         hostname=get_hostname(),
+        mdns_name=get_mdns_name(),
+        tak_status=get_takserver_status(),
         interfaces=get_interfaces(),
     )
+
+
 
 
 if __name__ == "__main__":

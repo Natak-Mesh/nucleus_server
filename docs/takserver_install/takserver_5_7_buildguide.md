@@ -245,6 +245,38 @@ sudo ufw allow 80/tcp
 > (`ip link` to find it). The DHCP rule is interface-scoped on purpose; the
 > web rule is intentionally global.
 
+### 8.2 MediaMTX streaming server
+
+MediaMTX (installed to `/usr/local/bin/mediamtx`, config at
+`/etc/mediamtx/mediamtx.yml`, running as the `mediamtx` systemd service) listens
+on the following default ports. Open all of them to expose every protocol, or
+trim the list to only the protocols you actually use:
+
+| Service | Port | Notes |
+|---------|------|-------|
+| RTSP | 8554/tcp | RTSP streaming |
+| RTP (RTSP) | 8000/udp | UDP media for RTSP |
+| RTCP (RTSP) | 8001/udp | UDP media for RTSP |
+| RTMP | 1935/tcp | RTMP ingest/playback |
+| HLS | 8888/tcp | HLS over HTTP |
+| WebRTC | 8889/tcp | WebRTC signaling/HTTP |
+| WebRTC ICE | 8189/udp | WebRTC UDP media |
+| SRT | 8890/udp | SRT |
+
+```bash
+sudo ufw allow 8554/tcp     # RTSP
+sudo ufw allow 8000/udp     # RTP (RTSP media)
+sudo ufw allow 8001/udp     # RTCP (RTSP media)
+sudo ufw allow 1935/tcp     # RTMP
+sudo ufw allow 8888/tcp     # HLS
+sudo ufw allow 8889/tcp     # WebRTC
+sudo ufw allow 8189/udp     # WebRTC ICE
+sudo ufw allow 8890/udp     # SRT
+```
+
+> These are MediaMTX's out-of-the-box defaults. If you change any `*Address`
+> setting in `/etc/mediamtx/mediamtx.yml`, update the firewall rules to match.
+
 ---
 
 ## Quick reference — client connection
