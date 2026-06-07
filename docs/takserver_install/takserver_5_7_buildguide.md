@@ -221,6 +221,30 @@ sudo ufw enable
 > See `ufw_mesh_firewall_rules.md` for the interface-specific rules
 > (`ufw allow in on <iface>`).
 
+### 8.1 WiFi access point & info web app
+
+The server runs a WiFi access point (SSID `001-server-nucleus`, static IP
+`10.30.1.1`) so you can always reach the box from a known address regardless of
+what the ethernet side is assigned. With `ufw default deny incoming`, two extra
+allows are required or the AP appears broken (clients never get an IP, and the
+info page is unreachable):
+
+```bash
+# DHCP server for the WiFi AP — scope to the AP interface ONLY.
+# Never allow DHCP on ethernet: the box would act as a rogue DHCP server
+# on whatever LAN it is plugged into and could break that network.
+sudo ufw allow in on wlx00c0cab6c5a8 to any port 67 proto udp
+
+# Info web app (port 80) on all interfaces, so it is reachable both over
+# the WiFi AP (http://10.30.1.1) and over ethernet (at the server's
+# ethernet IP). The page is read-only.
+sudo ufw allow 80/tcp
+```
+
+> Replace `wlx00c0cab6c5a8` with your Alfa AP interface name if different
+> (`ip link` to find it). The DHCP rule is interface-scoped on purpose; the
+> web rule is intentionally global.
+
 ---
 
 ## Quick reference — client connection
@@ -230,3 +254,26 @@ is one port field; enrollment and the live data feed both use 8089. Do **not**
 point the client at 8446 (that is the internal cert-config web connector) — doing
 so makes enrollment "succeed" then immediately drop with
 `I/O error, reconnecting`.
+
+**Which host/IP to enter** depends on how the client reaches the server (port is
+always 8089):
+
+- **Client on the same wired LAN as the server:** use the server's **ethernet
+  IP** (look it up on the info web page, or `ip -4 addr`).
+- **Client connected over the server's WiFi access point:** use the **AP's
+  static IP**.
+
+
+---
+
+## Info web page — finding the server
+
+The server hosts a small read-only info page (hostname + interface IPs) so you
+can find its address without a network scan. Two ways to reach it:
+
+- **WiFi AP (static IP):** connect to SSID `001-server-nucleus` →
+  `http://10.30.1.1`
+- **Wired LAN (mDNS hostname):** from any device on the same network →
+  `http://nucleus-server.local` (use `<hostname>.local` if renamed)
+
+See `webapp/README.md` for details and install steps.

@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Auto-refresh every 5 seconds so IPs stay current -->
+    <meta http-equiv="refresh" content="5">
+    <title>{{ hostname }} - Nucleus Server</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #0f1419;
+            color: #e6e6e6;
+            margin: 0;
+            padding: 1.5rem;
+        }
+        h1 {
+            font-size: 1.4rem;
+            margin: 0 0 0.25rem 0;
+            color: #4fc3f7;
+        }
+        .sub {
+            color: #8b9bb4;
+            font-size: 0.85rem;
+            margin-bottom: 1.5rem;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: #1a2230;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        th, td {
+            text-align: left;
+            padding: 0.75rem 1rem;
+            border-bottom: 1px solid #2a3444;
+        }
+        th {
+            background: #232d3d;
+            color: #8b9bb4;
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        tr:last-child td { border-bottom: none; }
+        .iface { font-weight: 600; color: #fff; }
+        .ip {
+            font-family: "SF Mono", Menlo, Consolas, monospace;
+            color: #81c784;
+        }
+        .ip.none { color: #5a6678; }
+        .state-UP { color: #81c784; }
+        .state-DOWN { color: #e57373; }
+        .state-UNKNOWN, .state-ERROR { color: #ffb74d; }
+        .footer {
+            margin-top: 1.5rem;
+            color: #5a6678;
+            font-size: 0.75rem;
+        }
+    </style>
+</head>
+<body>
+    <h1>{{ hostname }}</h1>
+    <div class="sub">Nucleus Server &mdash; network info</div>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Interface</th>
+                <th>State</th>
+                <th>IPv4 Address</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for iface in interfaces %}
+            <tr>
+                <td class="iface">{{ iface.name }}</td>
+                <td class="state-{{ iface.state }}">{{ iface.state }}</td>
+                <td>
+                    {% if iface.addrs %}
+                        {% for addr in iface.addrs %}
+                            <span class="ip">{{ addr }}</span>{% if not loop.last %}<br>{% endif %}
+                        {% endfor %}
+                    {% else %}
+                        <span class="ip none">&mdash;</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <div class="footer">Auto-refreshes every 5 seconds.</div>
+</body>
+</html>
