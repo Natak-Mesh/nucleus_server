@@ -216,6 +216,11 @@ sudo ufw allow 8443/tcp
 sudo ufw enable
 ```
 
+> **Remote clients over Tailscale:** if off-LAN users connect via the tailnet,
+> allow the Tailscale interface (the server must already be `sudo tailscale up`):
+> `sudo ufw allow in on tailscale0`. Port 8089 already binds all interfaces, so
+> no TAK config change is needed.
+
 > If you set `sudo ufw default deny incoming` (as TAK's docs do), you must also
 > explicitly allow your local bridge/mesh interfaces, or local services break.
 > See `ufw_mesh_firewall_rules.md` for the interface-specific rules
@@ -277,7 +282,55 @@ sudo ufw allow 8890/udp     # SRT
 > These are MediaMTX's out-of-the-box defaults. If you change any `*Address`
 > setting in `/etc/mediamtx/mediamtx.yml`, update the firewall rules to match.
 
+### 8.3 Mumble voice server
+
+ATAK's voice integration connects to a **Mumble server** (Debian package
+`mumble-server`, formerly Murmur). Install it with
+`scripts/install_mumble.sh`, which installs the package, enables/starts the
+`mumble-server` systemd service, and opens the firewall ports below.
+
+Mumble uses a single port for both its control channel and voice, on its
+**stock default port 64738** (the installer does not change any defaults):
+
+| Service | Port | Notes |
+|---------|------|-------|
+| Mumble control | 64738/tcp | TLS control channel (login, channels, text) |
+| Mumble voice | 64738/udp | UDP voice media |
+
+```bash
+sudo ufw allow 64738/tcp     # Mumble control channel
+sudo ufw allow 64738/udp     # Mumble voice
+```
+
+> **Defaults:** the server ships configured in `/etc/mumble-server.ini`
+> (a.k.a. `murmur.ini`) listening on `0.0.0.0:64738` (TCP **and** UDP), with no
+> server password and a max of 100 users. If you change `port` in
+> `/etc/mumble-server.ini`, update the firewall rules to match.
+
+#### SuperUser (admin) password
+
+`SuperUser` is Mumble's built-in admin account — you log in as it from a Mumble
+desktop client to administer the server (create channels, ban users, grant
+admin rights to others). The `install_mumble.sh` script sets this password
+automatically from the `MUMBLE_SUPERUSER_PW` variable at the top of the script
+(**default: `52235223`**).
+
+To change it, either edit `MUMBLE_SUPERUSER_PW` in the script and re-run it, or
+set it directly at any time (replace `<new-password>` with the password you
+want — there is no interactive prompt; the value after `-supw` becomes the
+password):
+
+```bash
+sudo mumble-server -supw <new-password>
+```
+
+
+> **ATAK:** connect via the Mumble plugin pointed at the server's reachable IP
+> (ethernet, AP, or Tailscale — see the client connection reference below) on
+> port 64738.
+
 ---
+
 
 ## Quick reference — client connection
 
@@ -294,6 +347,9 @@ always 8089):
   IP** (look it up on the info web page, or `ip -4 addr`).
 - **Client connected over the server's WiFi access point:** use the **AP's
   static IP**.
+- **Client off-LAN but on the same tailnet:** use the server's **Tailscale IP**
+  (`100.x.y.z`) or its MagicDNS name. Remote enrollment/data packages must point
+  here, not at the LAN/AP IP.
 
 
 ---

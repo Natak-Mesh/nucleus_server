@@ -62,6 +62,26 @@
         .tak .value { font-weight: 600; }
         .tak .running { color: #81c784; }
         .tak .stopped { color: #e57373; }
+        .tak .port {
+            font-family: "SF Mono", Menlo, Consolas, monospace;
+            color: #5a6678;
+            margin-left: 0.4rem;
+        }
+        .tak .open-btn {
+            display: inline-block;
+            margin-left: 0.6rem;
+            padding: 0.15rem 0.6rem;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: #0f1419;
+            background: #4fc3f7;
+            border-radius: 4px;
+            text-decoration: none;
+            vertical-align: middle;
+        }
+        .tak .open-btn:hover { background: #6fd0fa; }
+
+
 
 
         table {
@@ -123,7 +143,24 @@
     <div class="tak">
         <span class="label">TAK Server:</span>
         <span class="value {% if tak_status == 'Running' %}running{% else %}stopped{% endif %}">{{ tak_status }}</span>
+        <span class="port">:8443</span>
+        <a id="tak-open" class="open-btn" target="_blank" rel="noopener">Open &rarr;</a>
     </div>
+
+
+
+    <div class="tak">
+        <span class="label">MediaMTX:</span>
+        <span class="value {% if mediamtx_status == 'Running' %}running{% else %}stopped{% endif %}">{{ mediamtx_status }}</span>
+    </div>
+
+    <div class="tak">
+        <span class="label">Mumble:</span>
+        <span class="value {% if mumble_status == 'Running' %}running{% else %}stopped{% endif %}">{{ mumble_status }}</span>
+        <span class="port">:64738</span>
+    </div>
+
+
 
 
     <table>
@@ -155,5 +192,17 @@
     </table>
 
     <div class="footer">Auto-refreshes every 5 seconds.</div>
+
+    <script>
+        // Point the "Open" button at the TAK web UI on the same host the
+        // user is currently using (works for both IP and mDNS .local names).
+        (function () {
+            var btn = document.getElementById("tak-open");
+            if (btn) {
+                btn.href = "https://" + window.location.hostname + ":8443";
+            }
+        })();
+    </script>
 </body>
 </html>
+

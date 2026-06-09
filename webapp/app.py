@@ -86,15 +86,16 @@ def get_mdns_name():
     return f"{name}.local"
 
 
-def get_takserver_status():
+def get_service_status(name):
     """
-    Return "Running" if the takserver service is active, otherwise "Stopped".
+    Return "Running" if the given systemd service is active, otherwise
+    "Stopped".
 
-    Uses `systemctl is-active takserver` (read-only, no root required).
+    Uses `systemctl is-active <name>` (read-only, no root required).
     """
     try:
         out = subprocess.run(
-            ["systemctl", "is-active", "takserver"],
+            ["systemctl", "is-active", name],
             capture_output=True,
             text=True,
             timeout=5,
@@ -110,9 +111,12 @@ def index():
         "index.html",
         hostname=get_hostname(),
         mdns_name=get_mdns_name(),
-        tak_status=get_takserver_status(),
+        tak_status=get_service_status("takserver"),
+        mediamtx_status=get_service_status("mediamtx"),
+        mumble_status=get_service_status("mumble-server"),
         interfaces=get_interfaces(),
     )
+
 
 
 
