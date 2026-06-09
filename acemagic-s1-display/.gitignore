@@ -1,0 +1,13 @@
+# Local Python virtualenv
+.venv/
+
+# Generated/resized images
+prepared/
+
+# Cloned community repos (one-off reference)
+vendor/
+
+
+# Python caches
+__pycache__/
+*.pyc

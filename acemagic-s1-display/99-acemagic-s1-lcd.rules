@@ -1,0 +1,3 @@
+# AceMagic S1 front LCD (Holtek 04d9:fd01)
+# Allow non-root users in the 'plugdev' group to drive the panel via libusb.
+SUBSYSTEM=="usb", ATTRS{idVendor}=="04d9", ATTRS{idProduct}=="fd01", MODE="0660", GROUP="plugdev"
