@@ -100,56 +100,14 @@ fi
 echo ""
 
 # ============================================================================
-# 2. WiFi Access Point (hostapd)
+# 2. WiFi Access Point (hostapd + internet sharing)
 # ============================================================================
-echo "===> [2/6] WiFi Access Point (hostapd)"
+echo "===> [2/6] WiFi Access Point (hostapd + internet sharing)"
+echo "  -> Delegating to setup_ap.sh ..."
 
-for pkg in hostapd iw firmware-mediatek; do
-    if dpkg -l "$pkg" 2>/dev/null | grep -q '^ii'; then
-        echo "  -> $pkg is already installed."
-    else
-        echo "  -> Installing $pkg ..."
-        apt install -y "$pkg"
-    fi
-done
+bash "${SCRIPT_DIR}/setup_ap.sh"
 
-# Deploy config files from repo
-cp "${REPO_DIR}/system/hostapd.conf" /etc/hostapd/hostapd.conf
-echo "  -> Deployed hostapd.conf"
-
-sed -i 's|^#\?DAEMON_CONF=.*|DAEMON_CONF="/etc/hostapd/hostapd.conf"|' /etc/default/hostapd 2>/dev/null || \
-    echo 'DAEMON_CONF="/etc/hostapd/hostapd.conf"' > /etc/default/hostapd
-
-cp "${REPO_DIR}/system/10-ap.network" /etc/systemd/network/10-ap.network
-echo "  -> Deployed 10-ap.network"
-
-# Set regulatory domain to US (required for 5GHz channel 149)
-iw reg set US
-echo "  -> Regulatory domain set to US"
-
-# Ensure systemd-networkd is running (serves DHCP on the AP interface)
-systemctl enable systemd-networkd
-systemctl restart systemd-networkd
-echo "  -> systemd-networkd is running."
-
-# Start hostapd
-systemctl unmask hostapd 2>/dev/null || true
-systemctl enable hostapd
-systemctl restart hostapd
-echo "  -> hostapd is running."
-
-# UFW — allow all traffic on the AP interface
-AP_IFACE_UFW=$(grep '^interface=' /etc/hostapd/hostapd.conf | cut -d= -f2)
-UFW_BEFORE="/etc/ufw/before.rules"
-if [ -f "$UFW_BEFORE" ]; then
-    if ! grep -q "Allow all traffic on WiFi AP interface" "$UFW_BEFORE"; then
-        sed -i "/^COMMIT/i # Allow all traffic on WiFi AP interface\\n-A ufw-before-input -i ${AP_IFACE_UFW} -j ACCEPT" "$UFW_BEFORE"
-        echo "  -> Added UFW rule for AP interface."
-    fi
-    ufw reload
-    echo "  -> UFW reloaded."
-fi
-
+echo "  -> WiFi AP setup complete."
 echo ""
 
 # ============================================================================

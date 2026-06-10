@@ -19,13 +19,17 @@ The setup script installs and auto-starts the following services:
 | Service | Description | Ports |
 |---------|-------------|-------|
 | **avahi-daemon** | `.local` mDNS hostname resolution | 5353/udp |
-| **hostapd** | WiFi access point (5GHz ch149, SSID: nucleus-server-02) | — |
+| **hostapd** | WiFi access point (5GHz ch149, SSID: nucleus-server-02) + internet sharing via eth0 (NAT) | — |
 | **tailscaled** | Tailscale mesh VPN | — |
 | **mediamtx** | RTSP / RTMP / HLS / WebRTC media server | 8554, 1935, 8888, 8889, 9997 |
 | **mumble-server** | Low-latency VOIP (ATAK Mumble plugin) | 64738 tcp+udp |
 | **rnsd** | Reticulum mesh networking daemon | — |
 
-> **UFW Note:** The setup scripts automatically add a rule to `/etc/ufw/before.rules` to allow all traffic on the WiFi AP interface. This is required because UFW's default after-input rules drop DHCP (UDP ports 67/68), preventing clients from getting an IP address. The rule is added before the `COMMIT` line in the filter table.
+> **UFW Note:** The setup scripts automatically add rules to `/etc/ufw/before.rules`:
+> 1. **AP traffic** — allows all inbound traffic on the WiFi AP interface (required because UFW's default rules drop DHCP).
+> 2. **NAT masquerade** — adds a `*nat` table that masquerades traffic from the AP subnet (`10.30.2.0/24`) out through `eth0`, giving WiFi clients internet access.
+>
+> IP forwarding is enabled via `/etc/sysctl.d/99-ip-forward.conf` and DNS servers (`1.1.1.1`, `8.8.8.8`) are provided to clients via DHCP.
 
 After running the script, authenticate Tailscale:
 ```bash
@@ -42,4 +46,4 @@ The script is idempotent — safe to re-run at any time.
 | `scripts/setup.sh` | Base packages + Tailscale + Reticulum only |
 | `scripts/install_mumble.sh` | Mumble server only |
 | `scripts/install_webapp.sh` | Flask info web app |
-| `scripts/setup_ap.sh` | WiFi access point (hostapd) only |
+| `scripts/setup_ap.sh` | WiFi access point (hostapd) + internet sharing (NAT via eth0) |

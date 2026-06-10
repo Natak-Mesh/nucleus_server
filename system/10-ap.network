@@ -4,8 +4,10 @@ Name=wlx00c0cab6c5ba
 [Network]
 Address=10.30.2.1/24
 DHCPServer=yes
+IPForward=ipv4
 
 [DHCPServer]
 PoolOffset=10
 PoolSize=200
-EmitDNS=no
+EmitDNS=yes
+DNS=1.1.1.1 8.8.8.8
