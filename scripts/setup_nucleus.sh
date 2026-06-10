@@ -6,10 +6,11 @@
 # server services on a fresh Debian system:
 #
 #   1. Core packages  (curl, pipx, avahi-daemon)
-#   2. Tailscale      (secure mesh VPN)
-#   3. MediaMTX       (RTSP/RTMP/HLS/WebRTC media server)
-#   4. Mumble Server  (low-latency VOIP for ATAK)
-#   5. Reticulum      (resilient mesh networking daemon)
+#   2. WiFi AP        (hostapd access point)
+#   3. Tailscale      (secure mesh VPN)
+#   4. MediaMTX       (RTSP/RTMP/HLS/WebRTC media server)
+#   5. Mumble Server  (low-latency VOIP for ATAK)
+#   6. Reticulum      (resilient mesh networking daemon)
 #
 # All services are enabled to auto-start on boot.
 # The script is idempotent — safe to re-run.
@@ -63,7 +64,7 @@ REPO_DIR="$(dirname "$SCRIPT_DIR")"
 # ============================================================================
 # 1. Core Packages
 # ============================================================================
-echo "===> [1/5] Core packages (curl, pipx, avahi-daemon)"
+echo "===> [1/6] Core packages (curl, pipx, avahi-daemon)"
 
 apt update -y
 
@@ -99,9 +100,62 @@ fi
 echo ""
 
 # ============================================================================
-# 2. Tailscale
+# 2. WiFi Access Point (hostapd)
 # ============================================================================
-echo "===> [2/5] Tailscale (mesh VPN)"
+echo "===> [2/6] WiFi Access Point (hostapd)"
+
+for pkg in hostapd iw firmware-mediatek; do
+    if dpkg -l "$pkg" 2>/dev/null | grep -q '^ii'; then
+        echo "  -> $pkg is already installed."
+    else
+        echo "  -> Installing $pkg ..."
+        apt install -y "$pkg"
+    fi
+done
+
+# Deploy config files from repo
+cp "${REPO_DIR}/system/hostapd.conf" /etc/hostapd/hostapd.conf
+echo "  -> Deployed hostapd.conf"
+
+sed -i 's|^#\?DAEMON_CONF=.*|DAEMON_CONF="/etc/hostapd/hostapd.conf"|' /etc/default/hostapd 2>/dev/null || \
+    echo 'DAEMON_CONF="/etc/hostapd/hostapd.conf"' > /etc/default/hostapd
+
+cp "${REPO_DIR}/system/10-ap.network" /etc/systemd/network/10-ap.network
+echo "  -> Deployed 10-ap.network"
+
+# Set regulatory domain to US (required for 5GHz channel 149)
+iw reg set US
+echo "  -> Regulatory domain set to US"
+
+# Ensure systemd-networkd is running (serves DHCP on the AP interface)
+systemctl enable systemd-networkd
+systemctl restart systemd-networkd
+echo "  -> systemd-networkd is running."
+
+# Start hostapd
+systemctl unmask hostapd 2>/dev/null || true
+systemctl enable hostapd
+systemctl restart hostapd
+echo "  -> hostapd is running."
+
+# UFW — allow all traffic on the AP interface
+AP_IFACE_UFW=$(grep '^interface=' /etc/hostapd/hostapd.conf | cut -d= -f2)
+UFW_BEFORE="/etc/ufw/before.rules"
+if [ -f "$UFW_BEFORE" ]; then
+    if ! grep -q "Allow all traffic on WiFi AP interface" "$UFW_BEFORE"; then
+        sed -i "/^COMMIT/i # Allow all traffic on WiFi AP interface\\n-A ufw-before-input -i ${AP_IFACE_UFW} -j ACCEPT" "$UFW_BEFORE"
+        echo "  -> Added UFW rule for AP interface."
+    fi
+    ufw reload
+    echo "  -> UFW reloaded."
+fi
+
+echo ""
+
+# ============================================================================
+# 3. Tailscale
+# ============================================================================
+echo "===> [3/6] Tailscale (mesh VPN)"
 
 if command -v tailscale &>/dev/null; then
     echo "  -> Tailscale is already installed."
@@ -118,9 +172,9 @@ echo "     NOTE: Run 'sudo tailscale up' to authenticate if not already connecte
 echo ""
 
 # ============================================================================
-# 3. MediaMTX
+# 4. MediaMTX
 # ============================================================================
-echo "===> [3/5] MediaMTX (media server)"
+echo "===> [4/6] MediaMTX (media server)"
 
 MEDIAMTX_VERSION="1.12.2"
 MEDIAMTX_ARCH="linux_amd64"
@@ -211,9 +265,9 @@ fi
 echo ""
 
 # ============================================================================
-# 4. Mumble Server
+# 5. Mumble Server
 # ============================================================================
-echo "===> [4/5] Mumble Server (VOIP)"
+echo "===> [5/6] Mumble Server (VOIP)"
 
 MUMBLE_PORT=64738
 MUMBLE_SUPERUSER_PW="52235223"
@@ -243,9 +297,9 @@ fi
 echo ""
 
 # ============================================================================
-# 5. Reticulum (rns / rnsd)
+# 6. Reticulum (rns / rnsd)
 # ============================================================================
-echo "===> [5/5] Reticulum (mesh networking)"
+echo "===> [6/6] Reticulum (mesh networking)"
 
 # Install rns via pipx for the target user
 if sudo -u "$TARGET_USER" bash -lc 'command -v rnsd' &>/dev/null; then
@@ -301,6 +355,7 @@ echo ""
 echo "  Services (all enabled for auto-start):"
 echo "  ─────────────────────────────────────────"
 echo "  avahi-daemon   .local hostname resolution"
+echo "  hostapd        WiFi AP (5GHz channel 149)"
 echo "  tailscaled     Tailscale mesh VPN"
 echo "  mediamtx       RTSP :8554 | RTMP :1935 | HLS :8888 | WebRTC :8889"
 echo "  mumble-server  VOIP :${MUMBLE_PORT} (tcp+udp)"

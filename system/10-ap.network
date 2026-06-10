@@ -1,11 +1,11 @@
 [Match]
-Name=wlx00c0cab6c5a8
+Name=wlx00c0cab6c5ba
 
 [Network]
-Address=10.30.1.1/24
+Address=10.30.2.1/24
 DHCPServer=yes
 
 [DHCPServer]
 PoolOffset=10
-PoolSize=100
+PoolSize=200
 EmitDNS=no
