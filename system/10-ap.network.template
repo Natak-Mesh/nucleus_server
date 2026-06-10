@@ -1,5 +1,5 @@
 [Match]
-Name=wlx00c0cab6c5ba
+Name=__IFACE__
 
 [Network]
 Address=10.30.2.1/24

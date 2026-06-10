@@ -1,6 +1,6 @@
-interface=wlx00c0cab6c5ba
+interface=__IFACE__
 driver=nl80211
-ssid=nucleus-server-02
+ssid=__SSID__
 country_code=US
 ieee80211d=1
 hw_mode=a
