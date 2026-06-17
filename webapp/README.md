@@ -25,24 +25,23 @@ Firewall: the app needs port 80 open in UFW (see build guide section 8.1).
 
 There are two ways to reach the page:
 
-1. **Over the WiFi access point (static IP).**
-   Connect to the WiFi SSID `001-server-nucleus`, then browse to:
+1. **By hostname (mDNS) — works over WiFi or Ethernet.**
+   From any device on the same network (WiFi AP or wired LAN), browse to:
 
    ```
-   http://10.30.1.1
+   http://<hostname>.local
    ```
 
-   This address always works over WiFi regardless of the wired network.
+   For example, `http://nucleus-server.local`. The `.local` name is always
+   `<hostname>.local`. This uses mDNS (avahi-daemon, installed by
+   `scripts/setup.sh`). Most clients (macOS, iOS, Linux, modern Windows and
+   Android) resolve `.local` names natively. The WiFi SSID is the hostname, so
+   the network you connect to tells you the name to use.
 
-2. **Over the wired LAN, by hostname (mDNS).**
-   From any device on the same network the server's ethernet is plugged into,
-   browse to:
+2. **Over WiFi, via the gateway address.**
+   If a client can't resolve `.local` names, connect to the server's WiFi AP
+   and browse to the **gateway / router address** assigned to your device by
+   DHCP — the server is the gateway on its own `10.30.x.x` subnet. You can find
+   this address in your device's WiFi connection details (listed as "Router" or
+   "Gateway").
 
-   ```
-   http://nucleus-server.local
-   ```
-
-   This uses mDNS (avahi-daemon, installed by `scripts/setup.sh`). Substitute
-   your actual hostname if you changed it (the `.local` name is
-   `<hostname>.local`). Most clients (macOS, iOS, Linux, modern Windows and
-   Android) resolve `.local` names natively.

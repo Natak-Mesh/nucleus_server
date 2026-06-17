@@ -5,8 +5,9 @@ Nucleus Server - Info Web App
 A minimal, read-only Flask page that shows the server's network identity
 so you can find its IP without running a network scan.
 
-Connect to the WiFi AP (SSID: 001-server-nucleus) and browse to
-http://10.30.1.1 to view this page.
+Connect to the WiFi AP (the SSID is the server's hostname) and browse to
+http://<hostname>.local — or to the WiFi gateway address — to view this page.
+
 
 Served by waitress (production WSGI server) on 0.0.0.0:80.
 """
