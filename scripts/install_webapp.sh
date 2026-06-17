@@ -83,6 +83,16 @@ NoNewPrivileges=true
 WantedBy=multi-user.target
 EOF
 
+# --- Open port 80 in UFW (info web app) ---
+if command -v ufw &>/dev/null; then
+    echo "==> Opening web app port in UFW (80/tcp)..."
+    ufw allow 80/tcp
+    echo "==> UFW rule added."
+else
+    echo "==> WARNING: ufw not found; skipping firewall rule."
+    echo "    Manually open 80/tcp if a firewall is in use."
+fi
+
 # --- Enable + start ---
 echo "==> Enabling and starting ${APP_NAME} ..."
 systemctl daemon-reload
@@ -96,6 +106,9 @@ systemctl status "${APP_NAME}.service" --no-pager || true
 echo ""
 echo "============================================"
 echo "  Web app installed."
-echo "  Browse to:  http://10.30.1.1"
-echo "  (Connect to WiFi SSID: 001-server-nucleus)"
+echo "  Browse to (mDNS):  http://$(hostname).local"
+echo ""
+echo "  Or by IP:"
+ip -o -4 addr show scope global 2>/dev/null \
+    | awk '{ sub(/\/.*/, "", $4); print "    http://" $4 "  (" $2 ")" }'
 echo "============================================"

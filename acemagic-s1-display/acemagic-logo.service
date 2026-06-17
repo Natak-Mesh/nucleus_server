@@ -1,0 +1,12 @@
+[Unit]
+Description=AceMagic S1 front LCD custom logo
+After=multi-user.target
+
+[Service]
+Type=simple
+ExecStart=/home/natak/acemagic-s1-display/.venv/bin/python /home/natak/acemagic-s1-display/send_logo.py /home/natak/Documents/images/NatakMeshvertical-overlay.png --portrait --rotate 270 --watch
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
