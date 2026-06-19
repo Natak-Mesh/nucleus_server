@@ -65,6 +65,7 @@ All services are enabled to auto-start on boot.
 | **mediamtx** | RTSP / RTMP / HLS / WebRTC media server | 8554, 1935, 8888, 8889, 9997 | RTSP `rtsp://<hostname>.local:8554/<path>`, RTMP `rtmp://<hostname>.local:1935/<path>`, HLS `http://<hostname>.local:8888`, WebRTC `http://<hostname>.local:8889`, API `:9997` |
 | **mumble-server** | Low-latency VOIP (ATAK Mumble plugin) | 64738 tcp+udp | Connect a Mumble client / the ATAK Mumble plugin to `<hostname>.local:64738`. Admin via the `SuperUser` account |
 | **rnsd** | Reticulum mesh networking daemon | — | Runs as a background daemon |
+| **meshchatx** | Reticulum MeshChatX — headless web UI (LXMF messaging, network map, page browsing) for the mesh | 8000/tcp | `http://<hostname>.local:8000` (or the WiFi gateway address). Also linked from the web UI's Services list |
 | **takserver** | TAK server (status shown in the web UI) | — | Install per the build guide in `docs/` (requires 8 GB RAM) |
 
 ## Quick Start
@@ -110,6 +111,7 @@ The WiFi AP is configured automatically per-device:
 | `scripts/setup.sh` | Base packages + Tailscale + Reticulum only |
 | `scripts/install_mumble.sh` | Mumble server only |
 | `scripts/install_webapp.sh` | Flask info web app |
+| `scripts/install_meshchatx.sh` | Reticulum MeshChatX headless web UI (port 8000) |
 | `scripts/setup_ap.sh` | WiFi access point (hostapd) + internet sharing (NAT via eth0) |
 
 ### `setup_ap.sh` Usage

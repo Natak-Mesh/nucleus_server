@@ -115,6 +115,9 @@ ${RUN_USER} ALL=(root) NOPASSWD: \\
     /usr/bin/systemctl start rnsd, \\
     /usr/bin/systemctl stop rnsd, \\
     /usr/bin/systemctl restart rnsd, \\
+    /usr/bin/systemctl start meshchatx, \\
+    /usr/bin/systemctl stop meshchatx, \\
+    /usr/bin/systemctl restart meshchatx, \\
     /usr/bin/systemctl start nucleus-webapp, \\
     /usr/bin/systemctl restart nucleus-webapp
 

@@ -11,6 +11,7 @@
 #   4. MediaMTX       (RTSP/RTMP/HLS/WebRTC media server)
 #   5. Mumble Server  (low-latency VOIP for ATAK)
 #   6. Reticulum      (resilient mesh networking daemon)
+#   7. MeshChatX      (headless web UI for Reticulum)
 #
 # All services are enabled to auto-start on boot.
 # The script is idempotent — safe to re-run.
@@ -122,7 +123,7 @@ echo ""
 # ============================================================================
 # 1. Core Packages
 # ============================================================================
-echo "===> [1/6] Core packages (curl, pipx, iw, avahi-daemon)"
+echo "===> [1/7] Core packages (curl, pipx, iw, avahi-daemon)"
 
 
 apt update -y
@@ -171,7 +172,7 @@ echo ""
 # ============================================================================
 # 2. WiFi Access Point (hostapd + internet sharing)
 # ============================================================================
-echo "===> [2/6] WiFi Access Point (hostapd + internet sharing)"
+echo "===> [2/7] WiFi Access Point (hostapd + internet sharing)"
 echo "  -> Delegating to setup_ap.sh ..."
 
 bash "${SCRIPT_DIR}/setup_ap.sh"
@@ -182,7 +183,7 @@ echo ""
 # ============================================================================
 # 3. Tailscale
 # ============================================================================
-echo "===> [3/6] Tailscale (mesh VPN)"
+echo "===> [3/7] Tailscale (mesh VPN)"
 
 if command -v tailscale &>/dev/null; then
     echo "  -> Tailscale is already installed."
@@ -201,7 +202,7 @@ echo ""
 # ============================================================================
 # 4. MediaMTX
 # ============================================================================
-echo "===> [4/6] MediaMTX (media server)"
+echo "===> [4/7] MediaMTX (media server)"
 
 # Pinned MediaMTX version. The SHA256 is verified against every tarball
 # (downloaded or local) before install. To bump the version, update both
@@ -352,7 +353,7 @@ echo ""
 # ============================================================================
 # 5. Mumble Server
 # ============================================================================
-echo "===> [5/6] Mumble Server (VOIP)"
+echo "===> [5/7] Mumble Server (VOIP)"
 
 MUMBLE_PORT=64738
 # MUMBLE_SUPERUSER_PW is sourced from the per-unit secrets store near the top
@@ -386,7 +387,7 @@ echo ""
 # ============================================================================
 # 6. Reticulum (rns / rnsd)
 # ============================================================================
-echo "===> [6/6] Reticulum (mesh networking)"
+echo "===> [6/7] Reticulum (mesh networking)"
 
 # Install rns via pipx for the target user
 if sudo -u "$TARGET_USER" bash -lc 'command -v rnsd' &>/dev/null; then
@@ -427,9 +428,22 @@ echo "  -> rnsd is running."
 echo ""
 
 # ============================================================================
-# 7. Stage TAK CA truststore for the web app (client data packages)
+# 7. MeshChatX (headless web UI for Reticulum)
 # ============================================================================
-echo "===> [7] Staging TAK CA truststore for client data packages"
+echo "===> [7/7] MeshChatX (Reticulum web UI)"
+echo "  -> Delegating to install_meshchatx.sh ..."
+
+# Installs MeshChatX from its latest release wheel to /opt/meshchatx and runs
+# it as a systemd service on :8000, attached to the shared rnsd instance.
+# Non-fatal: a network/wheel failure must not abort the whole provisioning run.
+bash "${SCRIPT_DIR}/install_meshchatx.sh" "$TARGET_USER" || \
+    echo "  -> MeshChatX not installed (download may have failed). Re-run later: sudo bash ${SCRIPT_DIR}/install_meshchatx.sh"
+echo ""
+
+# ============================================================================
+# 8. Stage TAK CA truststore for the web app (client data packages)
+# ============================================================================
+echo "===> [8] Staging TAK CA truststore for client data packages"
 echo "  -> Delegating to refresh_tak_cert.sh ..."
 
 # Non-fatal: TAK may not be configured yet on first run. The webapp simply
@@ -460,6 +474,7 @@ echo "  tailscaled     Tailscale mesh VPN"
 echo "  mediamtx       RTSP :8554 | RTMP :1935 | HLS :8888 | WebRTC :8889"
 echo "  mumble-server  VOIP :${MUMBLE_PORT} (tcp+udp)"
 echo "  rnsd           Reticulum mesh daemon"
+echo "  meshchatx      Reticulum web UI  http://${HOSTNAME}.local:8000"
 echo ""
 echo "  Per-unit secrets (stored in ${NUCLEUS_SECRETS_FILE}, root-only):"
 echo "  ─────────────────────────────────────────"

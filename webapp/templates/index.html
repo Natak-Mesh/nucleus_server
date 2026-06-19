@@ -179,6 +179,16 @@
         <span class="{% if rnsd_status == 'Running' %}running{% else %}stopped{% endif %}">{{ rnsd_status }}</span>
         <span class="port">daemon</span>
     </div>
+    <div class="svc">
+        <span class="name">MeshChatX</span>
+        <span class="{% if meshchatx_status == 'Running' %}running{% else %}stopped{% endif %}">{{ meshchatx_status }}</span>
+        <span class="port">:{{ meshchatx_port }}</span>
+        <a id="meshchatx-open" class="btn" target="_blank" rel="noopener">Open &rarr;</a>
+    </div>
+    <div class="svc">
+        <span class="name">Tailscale</span>
+        <span class="{% if ts_status.logged_in %}running{% else %}stopped{% endif %}">{% if ts_status.logged_in %}Running{% else %}Stopped{% endif %}</span>
+    </div>
 
     <!-- ===================== TAK onboarding ===================== -->
     <h2>Join TAK</h2>
@@ -362,6 +372,12 @@
         (function () {
             var btn = document.getElementById("tak-open");
             if (btn) { btn.href = "https://" + window.location.hostname + ":8443"; }
+        })();
+
+        // Point the MeshChatX "Open" button at the same host on its web UI port.
+        (function () {
+            var btn = document.getElementById("meshchatx-open");
+            if (btn) { btn.href = "http://" + window.location.hostname + ":{{ meshchatx_port }}"; }
         })();
 
         // Download the data package via a same-origin fetch + blob. A normal

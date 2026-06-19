@@ -57,8 +57,12 @@ MANAGED_SERVICES = {
     "mediamtx": "MediaMTX",
     "mumble-server": "Mumble",
     "rnsd": "Reticulum",
+    "meshchatx": "MeshChatX",
     "nucleus-webapp": "Web App",
 }
+
+# Port the MeshChatX headless web UI listens on (see install_meshchatx.sh).
+MESHCHATX_PORT = 8000
 
 # Admin PIN, supplied by systemd via EnvironmentFile=/etc/nucleus/secrets.
 ADMIN_PIN = os.environ.get("ADMIN_PIN", "")
@@ -87,6 +91,8 @@ def get_interfaces():
         if name == "lo":
             continue
         state = iface.get("operstate", "UNKNOWN")
+        if state == "UNKNOWN" and "UP" in (iface.get("flags") or []):
+            state = "UP"
         addrs = [
             a.get("local")
             for a in iface.get("addr_info", [])
@@ -236,6 +242,8 @@ def index():
         mediamtx_status=get_service_status("mediamtx"),
         mumble_status=get_service_status("mumble-server"),
         rnsd_status=get_service_status("rnsd"),
+        meshchatx_status=get_service_status("meshchatx"),
+        meshchatx_port=MESHCHATX_PORT,
         interfaces=get_interfaces(),
         cpu_pct=get_cpu_percent(),
         mem_used=used_mb,

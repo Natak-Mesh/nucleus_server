@@ -1,0 +1,24 @@
+[Unit]
+Description=Reticulum MeshChatX (headless web UI)
+# Start after the shared Reticulum daemon so MeshChatX attaches to the existing
+# shared instance instead of racing to create its own.
+After=network.target rnsd.service
+Wants=rnsd.service
+
+[Service]
+Type=simple
+# NOTE: User, ExecStart paths (the run user's ~/.reticulum config dir) and the
+# storage dir are templated by scripts/install_meshchatx.sh, which writes the
+# live unit to /etc/systemd/system/meshchatx.service. This repo copy documents
+# the canonical shape; 'natak' is the default Nucleus appliance user.
+User=natak
+WorkingDirectory=/opt/meshchatx
+# Headless web server on all interfaces (LAN/AP), port 8000.
+# --reticulum-config-dir points at the run user's shared rnsd config so
+# MeshChatX joins the running instance rather than opening its own interfaces.
+ExecStart=/opt/meshchatx/.venv/bin/meshchatx --headless --no-https --host 0.0.0.0 --port 8000 --reticulum-config-dir /home/natak/.reticulum --storage-dir /opt/meshchatx/storage
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
