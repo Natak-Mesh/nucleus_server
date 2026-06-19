@@ -12,10 +12,17 @@ For the official TAK server, the box requires 8 GB RAM.
 
 ## Accessing the Web UI
 
-The web UI is a small read-only info page (`nucleus-webapp`, served on port 80)
-that shows the server's hostname, mDNS name, live interface IP addresses, and
-the running/stopped status of the key services. It's the easiest way to find
-the box's current addresses without a network scan.
+The web UI (`nucleus-webapp`, served on port 80) has two zones:
+
+- **Public zone** (no login): the server's hostname/mDNS name, live interface
+  IPs, a minimal CPU/RAM readout, running/stopped status of the key services,
+  QR codes (WiFi join, TAK web UI, data-package download), and a one-tap
+  **TAK client data-package download** for ATAK/WinTAK auto-enrollment.
+- **Admin zone** (per-unit PIN): start/stop/restart the core services and view
+  the per-unit Mumble SuperUser password. The PIN is generated at setup and
+  shown in the setup summary (stored in `/etc/nucleus/secrets`).
+
+It's the easiest way to find the box's current addresses without a network scan.
 
 There are two ways to reach it:
 
@@ -53,7 +60,7 @@ All services are enabled to auto-start on boot.
 |---------|---------|---------|---------------|
 | **nucleus-webapp** | Server info web page | 80/tcp | `http://<hostname>.local` (or the WiFi gateway address) |
 | **avahi-daemon** | `.local` mDNS hostname resolution | 5353/udp | Enables `<hostname>.local` for every service |
-| **hostapd** | WiFi access point (5 GHz, channel 149) + internet sharing via eth0 (NAT) | — | Connect to the WiFi network named after the hostname |
+| **hostapd** | WiFi access point (5 GHz, channel 149) + internet sharing via the auto-detected WAN interface (NAT) | — | Connect to the WiFi network named after the hostname |
 | **tailscaled** | Tailscale mesh VPN | — | Run `sudo tailscale up` once to authenticate |
 | **mediamtx** | RTSP / RTMP / HLS / WebRTC media server | 8554, 1935, 8888, 8889, 9997 | RTSP `rtsp://<hostname>.local:8554/<path>`, RTMP `rtmp://<hostname>.local:1935/<path>`, HLS `http://<hostname>.local:8888`, WebRTC `http://<hostname>.local:8889`, API `:9997` |
 | **mumble-server** | Low-latency VOIP (ATAK Mumble plugin) | 64738 tcp+udp | Connect a Mumble client / the ATAK Mumble plugin to `<hostname>.local:64738`. Admin via the `SuperUser` account |

@@ -46,7 +46,9 @@ fi
 # --- Deploy source to /opt ---
 echo "==> Deploying source to $DEPLOY_DIR ..."
 mkdir -p "$DEPLOY_DIR"
-cp -r "$SRC_DIR/app.py" "$SRC_DIR/templates" "$SRC_DIR/requirements.txt" "$DEPLOY_DIR/"
+cp -r "$SRC_DIR/app.py" "$SRC_DIR/datapackage.py" "$SRC_DIR/templates" \
+      "$SRC_DIR/requirements.txt" "$DEPLOY_DIR/"
+
 
 # --- Create / update the venv ---
 if [ ! -d "$DEPLOY_DIR/.venv" ]; then
@@ -59,6 +61,49 @@ echo "==> Installing dependencies (flask, waitress) ..."
 
 # --- Ownership ---
 chown -R "$RUN_USER":"$RUN_USER" "$DEPLOY_DIR"
+
+# --- Secrets file (created by setup_nucleus.sh; ensure it at least exists) ---
+SECRETS_FILE="/etc/nucleus/secrets"
+if [ ! -f "$SECRETS_FILE" ]; then
+    echo "==> NOTE: $SECRETS_FILE not found yet."
+    echo "    The admin PIN / Mumble password are provisioned by setup_nucleus.sh."
+    echo "    The web app will start, but the admin zone stays locked until that"
+    echo "    file exists with an ADMIN_PIN entry. Re-run this installer after"
+    echo "    setup_nucleus.sh, or it will pick the file up on next boot."
+fi
+
+# --- Sudoers rule: allow the web app user to control ONLY these services ---
+# Tightly scoped: exact systemctl verbs + exact unit names, nothing else.
+SUDOERS_FILE="/etc/sudoers.d/nucleus-webapp"
+echo "==> Installing sudoers rule: $SUDOERS_FILE ..."
+cat > "$SUDOERS_FILE" <<EOF
+# Allow the Nucleus web app to start/stop/restart ONLY the managed services.
+${RUN_USER} ALL=(root) NOPASSWD: \\
+    /usr/bin/systemctl start takserver, \\
+    /usr/bin/systemctl stop takserver, \\
+    /usr/bin/systemctl restart takserver, \\
+    /usr/bin/systemctl start mediamtx, \\
+    /usr/bin/systemctl stop mediamtx, \\
+    /usr/bin/systemctl restart mediamtx, \\
+    /usr/bin/systemctl start mumble-server, \\
+    /usr/bin/systemctl stop mumble-server, \\
+    /usr/bin/systemctl restart mumble-server, \\
+    /usr/bin/systemctl start rnsd, \\
+    /usr/bin/systemctl stop rnsd, \\
+    /usr/bin/systemctl restart rnsd, \\
+    /usr/bin/systemctl start nucleus-webapp, \\
+    /usr/bin/systemctl restart nucleus-webapp
+EOF
+chmod 0440 "$SUDOERS_FILE"
+# Validate before leaving it in place (a bad sudoers file can lock out sudo).
+VISUDO_BIN="$(command -v visudo || echo /usr/sbin/visudo)"
+if "$VISUDO_BIN" -cf "$SUDOERS_FILE" >/dev/null 2>&1; then
+    echo "==> sudoers rule validated."
+else
+    echo "ERROR: sudoers rule failed validation; removing it."
+    rm -f "$SUDOERS_FILE"
+    exit 1
+fi
 
 # --- Write the systemd service ---
 echo "==> Writing systemd service: $SERVICE_FILE ..."
@@ -77,11 +122,19 @@ RestartSec=3
 # Allow binding privileged port 80 without full root
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE
-NoNewPrivileges=true
+# Load the per-unit secrets (ADMIN_PIN, MUMBLE_SUPERUSER_PW) as environment
+# variables. systemd reads this as root before dropping to ${RUN_USER}, so the
+# web app gets the values without the file being world-readable. '-' => the
+# service still starts if the file does not exist yet.
+EnvironmentFile=-/etc/nucleus/secrets
+# NOTE: NoNewPrivileges is intentionally NOT set — the admin zone uses a
+# tightly-scoped 'sudo systemctl' (see /etc/sudoers.d/nucleus-webapp), which
+# NoNewPrivileges would block.
 
 [Install]
 WantedBy=multi-user.target
 EOF
+
 
 # --- Open port 80 in UFW (info web app) ---
 if command -v ufw &>/dev/null; then

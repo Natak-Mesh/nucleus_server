@@ -61,10 +61,69 @@ echo ""
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(dirname "$SCRIPT_DIR")"
 
+# ---- Per-unit secrets (generate-once, persisted, never overwritten) ----
+# shellcheck source=lib/secrets.sh
+source "${SCRIPT_DIR}/lib/secrets.sh"
+MUMBLE_SUPERUSER_PW="$(secret_get_or_create MUMBLE_SUPERUSER_PW gen_password 20)"
+ADMIN_PIN="$(secret_get_or_create ADMIN_PIN gen_pin 6)"
+
+# ============================================================================
+# 0. Preflight checks (advisory — warns, does not hard-fail)
+# ============================================================================
+
+echo "===> [0] Preflight checks"
+
+PREFLIGHT_WARN=0
+
+# Architecture
+ARCH="$(uname -m)"
+echo "  -> Architecture : $ARCH"
+if [ "$ARCH" != "x86_64" ] && [ "$ARCH" != "aarch64" ]; then
+    echo "     WARNING: untested architecture '$ARCH' (expected x86_64 or aarch64)."
+    PREFLIGHT_WARN=1
+fi
+
+# RAM (TAK server needs 8 GB)
+MEM_KB=$(awk '/^MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)
+MEM_GB=$(( MEM_KB / 1024 / 1024 ))
+echo "  -> RAM          : ${MEM_GB} GB"
+if [ "$MEM_GB" -lt 8 ]; then
+    echo "     WARNING: < 8 GB RAM. The official TAK server requires 8 GB."
+    PREFLIGHT_WARN=1
+fi
+
+# Free disk on / (root)
+DISK_AVAIL=$(df -BG --output=avail / 2>/dev/null | tail -1 | tr -dc '0-9' || echo 0)
+echo "  -> Free disk (/): ${DISK_AVAIL} GB"
+if [ -n "$DISK_AVAIL" ] && [ "$DISK_AVAIL" -lt 10 ]; then
+    echo "     WARNING: < 10 GB free on /."
+    PREFLIGHT_WARN=1
+fi
+
+# At least one wireless interface (needed for the AP)
+WIFI_COUNT=0
+for w in /sys/class/net/*/wireless; do
+    [ -d "$w" ] && WIFI_COUNT=$((WIFI_COUNT + 1))
+done
+echo "  -> WiFi adapters: $WIFI_COUNT"
+if [ "$WIFI_COUNT" -eq 0 ]; then
+    echo "     WARNING: no wireless interface detected — the WiFi AP step will fail."
+    PREFLIGHT_WARN=1
+fi
+
+if [ "$PREFLIGHT_WARN" -eq 0 ]; then
+    echo "  -> Preflight: all checks passed."
+else
+    echo "  -> Preflight: completed with warnings (continuing in 3s) ..."
+    sleep 3
+fi
+echo ""
+
 # ============================================================================
 # 1. Core Packages
 # ============================================================================
-echo "===> [1/6] Core packages (curl, pipx, avahi-daemon)"
+echo "===> [1/6] Core packages (curl, pipx, iw, avahi-daemon)"
+
 
 apt update -y
 
@@ -76,6 +135,16 @@ for pkg in curl pipx; do
         apt install -y "$pkg"
     fi
 done
+
+# iw — required by setup_ap.sh (iw reg set US). Install here so it is
+# guaranteed present before the AP step runs, regardless of setup_ap.sh.
+if command -v iw &>/dev/null; then
+    echo "  -> iw is already installed."
+else
+    echo "  -> Installing iw ..."
+    apt install -y iw
+fi
+
 
 # avahi-daemon for .local mDNS
 if dpkg -l avahi-daemon 2>/dev/null | grep -q '^ii'; then
@@ -134,24 +203,82 @@ echo ""
 # ============================================================================
 echo "===> [4/6] MediaMTX (media server)"
 
-MEDIAMTX_VERSION="1.12.2"
+# Pinned MediaMTX version. The SHA256 is verified against every tarball
+# (downloaded or local) before install. To bump the version, update both
+# MEDIAMTX_VERSION and MEDIAMTX_SHA256 together.
+MEDIAMTX_VERSION="1.18.2"
 MEDIAMTX_ARCH="linux_amd64"
+MEDIAMTX_SHA256="73ed27c292e05ceb4990dcb34531f01872dfff5374b7515c45a202e0abf47706"
 MEDIAMTX_TARBALL="mediamtx_v${MEDIAMTX_VERSION}_${MEDIAMTX_ARCH}.tar.gz"
 MEDIAMTX_URL="https://github.com/bluenviron/mediamtx/releases/download/v${MEDIAMTX_VERSION}/${MEDIAMTX_TARBALL}"
 MEDIAMTX_BIN="/usr/local/bin/mediamtx"
 MEDIAMTX_CONF_DIR="/etc/mediamtx"
 MEDIAMTX_CONF="${MEDIAMTX_CONF_DIR}/mediamtx.yml"
 MEDIAMTX_SERVICE="/etc/systemd/system/mediamtx.service"
+# Local fallback tarball locations (used if the download fails — e.g. offline
+# field installs). Checked in order.
+MEDIAMTX_LOCAL_CANDIDATES=(
+    "${REPO_DIR}/vendor/${MEDIAMTX_TARBALL}"
+    "${TARGET_HOME}/${MEDIAMTX_TARBALL}"
+)
+
+# Verify a tarball's SHA256 against the pinned value. Returns 0 on match.
+verify_mediamtx_sha() {
+    local file="$1"
+    local actual
+    actual=$(sha256sum "$file" | awk '{print $1}')
+    if [ "$actual" = "$MEDIAMTX_SHA256" ]; then
+        return 0
+    fi
+    echo "     SHA256 mismatch for $file"
+    echo "       expected: $MEDIAMTX_SHA256"
+    echo "       actual  : $actual"
+    return 1
+}
 
 if [ -x "$MEDIAMTX_BIN" ]; then
     echo "  -> MediaMTX binary already exists at $MEDIAMTX_BIN."
 else
-    echo "  -> Downloading MediaMTX v${MEDIAMTX_VERSION} ..."
     TMPDIR=$(mktemp -d)
-    curl -fsSL "$MEDIAMTX_URL" -o "${TMPDIR}/${MEDIAMTX_TARBALL}"
+    TARBALL_PATH="${TMPDIR}/${MEDIAMTX_TARBALL}"
+    GOT_TARBALL=0
+
+    # 1. Try the pinned download.
+    echo "  -> Downloading MediaMTX v${MEDIAMTX_VERSION} ..."
+    if curl -fsSL "$MEDIAMTX_URL" -o "$TARBALL_PATH" && verify_mediamtx_sha "$TARBALL_PATH"; then
+        echo "  -> Download verified (SHA256 OK)."
+        GOT_TARBALL=1
+    else
+        echo "  -> Download failed or did not verify; trying local fallback ..."
+    fi
+
+    # 2. Offline fallback: use a local copy if present and verified.
+    if [ "$GOT_TARBALL" -ne 1 ]; then
+        for cand in "${MEDIAMTX_LOCAL_CANDIDATES[@]}"; do
+            if [ -f "$cand" ]; then
+                echo "  -> Found local tarball: $cand"
+                if verify_mediamtx_sha "$cand"; then
+                    cp "$cand" "$TARBALL_PATH"
+                    echo "  -> Local tarball verified (SHA256 OK)."
+                    GOT_TARBALL=1
+                    break
+                fi
+            fi
+        done
+    fi
+
+    if [ "$GOT_TARBALL" -ne 1 ]; then
+        echo "ERROR: Could not obtain a verified MediaMTX v${MEDIAMTX_VERSION} tarball."
+        echo "       Tried download and local fallbacks:"
+        printf '         %s\n' "${MEDIAMTX_LOCAL_CANDIDATES[@]}"
+        rm -rf "$TMPDIR"
+        exit 1
+    fi
+
     echo "  -> Extracting ..."
-    tar -xzf "${TMPDIR}/${MEDIAMTX_TARBALL}" -C "$TMPDIR"
+    tar -xzf "$TARBALL_PATH" -C "$TMPDIR"
     install -m 0755 "${TMPDIR}/mediamtx" "$MEDIAMTX_BIN"
+
     # Install default config if not already present
     mkdir -p "$MEDIAMTX_CONF_DIR"
     if [ ! -f "$MEDIAMTX_CONF" ]; then
@@ -228,9 +355,11 @@ echo ""
 echo "===> [5/6] Mumble Server (VOIP)"
 
 MUMBLE_PORT=64738
-MUMBLE_SUPERUSER_PW="52235223"
+# MUMBLE_SUPERUSER_PW is sourced from the per-unit secrets store near the top
+# of this script (generate-once, persisted). No hardcoded password here.
 
 if dpkg -l mumble-server 2>/dev/null | grep -q '^ii'; then
+
     echo "  -> mumble-server is already installed."
 else
     echo "  -> Installing mumble-server ..."
@@ -298,9 +427,22 @@ echo "  -> rnsd is running."
 echo ""
 
 # ============================================================================
+# 7. Stage TAK CA truststore for the web app (client data packages)
+# ============================================================================
+echo "===> [7] Staging TAK CA truststore for client data packages"
+echo "  -> Delegating to refresh_tak_cert.sh ..."
+
+# Non-fatal: TAK may not be configured yet on first run. The webapp simply
+# won't offer the data-package download until this succeeds (re-run any time).
+bash "${SCRIPT_DIR}/refresh_tak_cert.sh" "$TARGET_USER" || \
+    echo "  -> TAK cert not staged yet (TAK may not be configured). Re-run later: sudo bash ${SCRIPT_DIR}/refresh_tak_cert.sh"
+echo ""
+
+# ============================================================================
 # Summary
 # ============================================================================
 HOSTNAME=$(hostname)
+
 echo ""
 echo "============================================"
 echo "  Nucleus Server Setup Complete!"
@@ -319,7 +461,14 @@ echo "  mediamtx       RTSP :8554 | RTMP :1935 | HLS :8888 | WebRTC :8889"
 echo "  mumble-server  VOIP :${MUMBLE_PORT} (tcp+udp)"
 echo "  rnsd           Reticulum mesh daemon"
 echo ""
+echo "  Per-unit secrets (stored in ${NUCLEUS_SECRETS_FILE}, root-only):"
+echo "  ─────────────────────────────────────────"
+echo "  Mumble SuperUser password : ${MUMBLE_SUPERUSER_PW}"
+echo "  Dashboard admin PIN       : ${ADMIN_PIN}"
+echo "  (Persisted — these stay the same across re-runs/reboots.)"
+echo ""
 echo "  Next steps:"
 echo "    sudo tailscale up          # authenticate Tailscale"
 echo "    ssh ${TARGET_USER}@${HOSTNAME}.local"
 echo "============================================"
+

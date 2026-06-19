@@ -3,17 +3,21 @@
 # Nucleus Server - WiFi Access Point Setup Script
 #
 # Installs and configures hostapd to create a WiFi access point with
-# internet sharing (NAT) from eth0 to connected WiFi clients.
+# internet sharing (NAT) from the WAN (default-route) interface to connected
+# WiFi clients.
 #
 # Auto-detects the wireless interface (or accepts one as an argument).
-# Generates hostapd.conf and systemd-networkd config from templates,
-# sets the wireless regulatory domain, enables IP forwarding,
+# Auto-detects the WAN/uplink interface from the default route (or accepts one
+# as a second argument). Generates hostapd.conf and systemd-networkd config
+# from templates, sets the wireless regulatory domain, enables IP forwarding,
 # configures NAT masquerade via UFW, and starts the AP.
 #
 # Usage (run as root):
-#   sudo bash setup_ap.sh              # auto-detect wireless interface
-#   sudo bash setup_ap.sh wlx00c0ca... # specify interface explicitly
+#   sudo bash setup_ap.sh                         # auto-detect both interfaces
+#   sudo bash setup_ap.sh wlx00c0ca...            # specify wireless iface
+#   sudo bash setup_ap.sh wlx00c0ca... enp1s0     # specify wireless + WAN iface
 # ============================================================================
+
 
 set -euo pipefail
 
@@ -105,13 +109,38 @@ fi
 # ---- Derive SSID from hostname ----
 AP_SSID="$(hostname)"
 
+# ---- Determine the WAN / uplink interface (for NAT internet sharing) ----
+# Priority: explicit 2nd arg > default-route interface > legacy eth0.
+if [ $# -ge 2 ]; then
+    WAN_IFACE="$2"
+    echo "Using specified WAN interface: $WAN_IFACE"
+else
+    WAN_IFACE="$(ip route show default 2>/dev/null | awk '{print $5; exit}')"
+    if [ -z "$WAN_IFACE" ]; then
+        WAN_IFACE="eth0"
+        echo "WARNING: No default route found; falling back to WAN interface 'eth0'."
+    else
+        echo "Auto-detected WAN interface (default route): $WAN_IFACE"
+    fi
+fi
+
+# Don't let the WAN accidentally be the AP interface.
+if [ "$WAN_IFACE" = "$AP_IFACE" ]; then
+    echo "WARNING: Detected WAN interface ($WAN_IFACE) is the same as the AP"
+    echo "         interface. NAT internet sharing will not work until a"
+    echo "         separate uplink is connected. Pass the WAN iface explicitly:"
+    echo "           sudo bash $0 $AP_IFACE <wan-iface>"
+fi
+
 echo ""
 echo "============================================"
 echo "  WiFi Access Point Setup"
-echo "  Interface : $AP_IFACE"
-echo "  SSID      : $AP_SSID"
+echo "  AP Interface  : $AP_IFACE"
+echo "  WAN Interface : $WAN_IFACE"
+echo "  SSID          : $AP_SSID"
 echo "============================================"
 echo ""
+
 
 # ============================================================================
 # 1. Install packages
@@ -239,25 +268,33 @@ fi
 echo ""
 
 # ============================================================================
-# 8. UFW — NAT masquerade (internet sharing via eth0)
+# 8. UFW — NAT masquerade (internet sharing via the WAN interface)
 # ============================================================================
-echo "===> [8/8] Configuring NAT masquerade for internet sharing"
+echo "===> [8/8] Configuring NAT masquerade for internet sharing (-> $WAN_IFACE)"
 
 AP_SUBNET=$(grep '^Address=' /etc/systemd/network/10-ap.network | cut -d= -f2 | xargs)
 
 if [ -f "$UFW_BEFORE" ]; then
     if grep -q "NAT masquerade for WiFi AP internet sharing" "$UFW_BEFORE"; then
-        echo "  -> NAT masquerade rule already present."
+        # Rule block exists — make sure it points at the current WAN interface.
+        CURRENT_NAT=$(grep -E '^-A POSTROUTING -s .* -o .* -j MASQUERADE' "$UFW_BEFORE" | head -1)
+        if echo "$CURRENT_NAT" | grep -q -- "-o ${WAN_IFACE} "; then
+            echo "  -> NAT masquerade rule already present (-> $WAN_IFACE)."
+        else
+            # Update the existing masquerade line to the detected WAN iface + subnet.
+            sed -i -E "s|^-A POSTROUTING -s .* -o .* -j MASQUERADE|-A POSTROUTING -s ${AP_SUBNET} -o ${WAN_IFACE} -j MASQUERADE|" "$UFW_BEFORE"
+            echo "  -> Updated NAT masquerade rule (${AP_SUBNET} -> ${WAN_IFACE})"
+        fi
     else
         # Prepend the *nat table block before the *filter table
         sed -i "1a\\
 # NAT masquerade for WiFi AP internet sharing\\
 *nat\\
 :POSTROUTING ACCEPT [0:0]\\
--A POSTROUTING -s ${AP_SUBNET} -o eth0 -j MASQUERADE\\
+-A POSTROUTING -s ${AP_SUBNET} -o ${WAN_IFACE} -j MASQUERADE\\
 COMMIT\\
 " "$UFW_BEFORE"
-        echo "  -> Added NAT masquerade rule (${AP_SUBNET} -> eth0)"
+        echo "  -> Added NAT masquerade rule (${AP_SUBNET} -> ${WAN_IFACE})"
     fi
     ufw reload
     echo "  -> UFW reloaded."
@@ -265,6 +302,7 @@ else
     echo "  -> UFW not found, skipping NAT setup."
     echo "     You may need to manually configure iptables NAT."
 fi
+
 
 echo ""
 
@@ -278,16 +316,18 @@ echo "============================================"
 echo "  WiFi Access Point Setup Complete!"
 echo "============================================"
 echo ""
-echo "  SSID      : $AP_SSID"
-echo "  Interface  : $AP_IFACE"
+echo "  SSID       : $AP_SSID"
+echo "  AP Iface   : $AP_IFACE"
+echo "  WAN Iface  : $WAN_IFACE"
 echo "  Channel    : $AP_CHANNEL"
 echo "  IP/Subnet  : $AP_IP"
-echo "  Internet   : NAT via eth0"
+echo "  Internet   : NAT via $WAN_IFACE"
 echo ""
 echo "  Services:"
 echo "  ─────────────────────────────────────────"
 echo "  hostapd          WiFi AP"
 echo "  systemd-networkd Static IP + DHCP server"
 echo "  IP forwarding    Enabled (sysctl)"
-echo "  NAT masquerade   eth0 (UFW before.rules)"
+echo "  NAT masquerade   $WAN_IFACE (UFW before.rules)"
 echo "============================================"
+
