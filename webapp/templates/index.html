@@ -144,51 +144,55 @@
     <div class="meters">
         <div class="meter">
             <span class="label">CPU</span>
-            <div class="val">{% if cpu_pct is not none %}{{ cpu_pct }}%{% else %}&mdash;{% endif %}</div>
-            <div class="bar"><span style="width: {{ cpu_pct if cpu_pct is not none else 0 }}%"></span></div>
+            <div class="val" id="cpu-val">{% if cpu_pct is not none %}{{ cpu_pct }}%{% else %}&mdash;{% endif %}</div>
+            <div class="bar"><span id="cpu-bar" style="width: {{ cpu_pct if cpu_pct is not none else 0 }}%"></span></div>
         </div>
         <div class="meter">
             <span class="label">Memory</span>
-            <div class="val">
+            <div class="val" id="mem-val">
                 {% if mem_total %}{{ mem_used }}<span style="font-size:0.8rem;color:#8b9bb4"> / {{ mem_total }} MB</span>{% else %}&mdash;{% endif %}
             </div>
-            <div class="bar"><span style="width: {{ ((mem_used / mem_total * 100) | round(0, 'floor')) if mem_total else 0 }}%"></span></div>
+            <div class="bar"><span id="mem-bar" style="width: {{ ((mem_used / mem_total * 100) | round(0, 'floor')) if mem_total else 0 }}%"></span></div>
         </div>
+
     </div>
 
     <!-- ===================== Services ===================== -->
     <h2>Services</h2>
     <div class="svc">
         <span class="name">TAK Server</span>
-        <span class="{% if tak_status == 'Running' %}running{% else %}stopped{% endif %}">{{ tak_status }}</span>
+        <span class="svc-state {% if tak_status == 'Running' %}running{% else %}stopped{% endif %}" data-svc="takserver">{{ tak_status }}</span>
         <span class="port">:8443</span>
+
         <a id="tak-open" class="btn" target="_blank" rel="noopener">Open &rarr;</a>
     </div>
     <div class="svc">
         <span class="name">MediaMTX</span>
-        <span class="{% if mediamtx_status == 'Running' %}running{% else %}stopped{% endif %}">{{ mediamtx_status }}</span>
+        <span class="svc-state {% if mediamtx_status == 'Running' %}running{% else %}stopped{% endif %}" data-svc="mediamtx">{{ mediamtx_status }}</span>
         <span class="port">RTSP :8554 &middot; HLS :8888</span>
+
     </div>
     <div class="svc">
         <span class="name">Mumble</span>
-        <span class="{% if mumble_status == 'Running' %}running{% else %}stopped{% endif %}">{{ mumble_status }}</span>
+        <span class="svc-state {% if mumble_status == 'Running' %}running{% else %}stopped{% endif %}" data-svc="mumble-server">{{ mumble_status }}</span>
         <span class="port">{{ mdns_name }}:64738</span>
     </div>
     <div class="svc">
         <span class="name">Reticulum</span>
-        <span class="{% if rnsd_status == 'Running' %}running{% else %}stopped{% endif %}">{{ rnsd_status }}</span>
+        <span class="svc-state {% if rnsd_status == 'Running' %}running{% else %}stopped{% endif %}" data-svc="rnsd">{{ rnsd_status }}</span>
         <span class="port">daemon</span>
     </div>
     <div class="svc">
         <span class="name">MeshChatX</span>
-        <span class="{% if meshchatx_status == 'Running' %}running{% else %}stopped{% endif %}">{{ meshchatx_status }}</span>
+        <span class="svc-state {% if meshchatx_status == 'Running' %}running{% else %}stopped{% endif %}" data-svc="meshchatx">{{ meshchatx_status }}</span>
         <span class="port">:{{ meshchatx_port }}</span>
         <a id="meshchatx-open" class="btn" target="_blank" rel="noopener">Open &rarr;</a>
     </div>
     <div class="svc">
         <span class="name">Tailscale</span>
-        <span class="{% if ts_status.logged_in %}running{% else %}stopped{% endif %}">{% if ts_status.logged_in %}Running{% else %}Stopped{% endif %}</span>
+        <span class="svc-state {% if ts_status.logged_in %}running{% else %}stopped{% endif %}" data-svc="tailscale">{% if ts_status.logged_in %}Running{% else %}Stopped{% endif %}</span>
     </div>
+
 
     <!-- ===================== TAK onboarding ===================== -->
     <h2>Join TAK</h2>
@@ -229,7 +233,8 @@
         <thead>
             <tr><th>Interface</th><th>State</th><th>IPv4 Address</th></tr>
         </thead>
-        <tbody>
+        <tbody id="iface-body">
+
             {% for iface in interfaces %}
             <tr>
                 <td class="iface">{{ iface.name }}</td>
@@ -481,7 +486,110 @@
             poll();
         })();
 
+        // Live system stats: poll /stats and update the CPU/RAM meters, service
+        // states, and interface table in place so the readouts reflect the
+        // machine's current state instead of a frozen page-load snapshot.
+        (function () {
+            function setState(el, status) {
+                if (!el) { return; }
+                var running = status === "Running";
+                el.textContent = status;
+                el.classList.toggle("running", running);
+                el.classList.toggle("stopped", !running);
+            }
+
+            function renderInterfaces(tbody, interfaces) {
+                if (!tbody) { return; }
+                tbody.innerHTML = "";
+                interfaces.forEach(function (iface) {
+                    var tr = document.createElement("tr");
+
+                    var name = document.createElement("td");
+                    name.className = "iface";
+                    name.textContent = iface.name;
+
+                    var state = document.createElement("td");
+                    state.className = "state-" + iface.state;
+                    state.textContent = iface.state;
+
+                    var addr = document.createElement("td");
+                    if (iface.addrs && iface.addrs.length) {
+                        iface.addrs.forEach(function (a, i) {
+                            if (i > 0) { addr.appendChild(document.createElement("br")); }
+                            var span = document.createElement("span");
+                            span.className = "ip";
+                            span.textContent = a;
+                            addr.appendChild(span);
+                        });
+                    } else {
+                        var span = document.createElement("span");
+                        span.className = "ip none";
+                        span.textContent = "\u2014";
+                        addr.appendChild(span);
+                    }
+
+                    tr.appendChild(name);
+                    tr.appendChild(state);
+                    tr.appendChild(addr);
+                    tbody.appendChild(tr);
+                });
+            }
+
+            var cpuVal = document.getElementById("cpu-val");
+            var cpuBar = document.getElementById("cpu-bar");
+            var memVal = document.getElementById("mem-val");
+            var memBar = document.getElementById("mem-bar");
+            var ifaceBody = document.getElementById("iface-body");
+
+            function pollStats() {
+                fetch("stats", { credentials: "same-origin" })
+                    .then(function (resp) { return resp.ok ? resp.json() : null; })
+                    .then(function (data) {
+                        if (!data) { return; }
+
+                        // CPU
+                        if (cpuVal) {
+                            cpuVal.textContent = data.cpu_pct === null ? "\u2014" : data.cpu_pct + "%";
+                        }
+                        if (cpuBar) {
+                            cpuBar.style.width = (data.cpu_pct === null ? 0 : data.cpu_pct) + "%";
+                        }
+
+                        // Memory
+                        if (memVal) {
+                            if (data.mem_total) {
+                                memVal.innerHTML = data.mem_used +
+                                    '<span style="font-size:0.8rem;color:#8b9bb4"> / ' +
+                                    data.mem_total + ' MB</span>';
+                            } else {
+                                memVal.textContent = "\u2014";
+                            }
+                        }
+                        if (memBar) {
+                            var pct = data.mem_total ? Math.floor(data.mem_used / data.mem_total * 100) : 0;
+                            memBar.style.width = pct + "%";
+                        }
+
+                        // Services
+                        if (data.services) {
+                            document.querySelectorAll(".svc-state").forEach(function (el) {
+                                var key = el.getAttribute("data-svc");
+                                if (key in data.services) { setState(el, data.services[key]); }
+                            });
+                        }
+
+                        // Interfaces
+                        renderInterfaces(ifaceBody, data.interfaces || []);
+                    })
+                    .catch(function () { /* keep last good values on a hiccup */ });
+            }
+
+            pollStats();
+            setInterval(pollStats, 3000);
+        })();
+
     </script>
+
 
 </body>
 </html>

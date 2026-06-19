@@ -140,33 +140,39 @@ def get_service_status(name):
         return "Stopped"
 
 
+# Previous /proc/stat snapshot, so CPU% is measured as the average over the
+# real time between calls (i.e. between page loads / poll requests) instead of
+# a short self-measuring sleep that spikes on the web app's own activity.
+_cpu_prev = None
+
+
 def get_cpu_percent():
     """
-    Rough CPU utilisation (%) over a short sample, from /proc/stat.
+    CPU utilisation (%) as the average since the previous call, from /proc/stat.
 
-    Returns an int 0-100, or None if unavailable.
+    Returns an int 0-100, or None if unavailable (e.g. the very first call,
+    which has no prior snapshot to diff against).
     """
+    global _cpu_prev
     try:
-        def _read():
-            with open("/proc/stat", "r") as fh:
-                parts = fh.readline().split()
-            vals = [int(x) for x in parts[1:]]
-            idle = vals[3] + (vals[4] if len(vals) > 4 else 0)
-            total = sum(vals)
-            return idle, total
+        with open("/proc/stat", "r") as fh:
+            parts = fh.readline().split()
+        vals = [int(x) for x in parts[1:]]
+        idle = vals[3] + (vals[4] if len(vals) > 4 else 0)
+        total = sum(vals)
 
-        import time
-
-        idle1, total1 = _read()
-        time.sleep(0.1)
-        idle2, total2 = _read()
-        dt = total2 - total1
-        di = idle2 - idle1
+        prev = _cpu_prev
+        _cpu_prev = (idle, total)
+        if prev is None:
+            return None
+        dt = total - prev[1]
+        di = idle - prev[0]
         if dt <= 0:
             return None
         return max(0, min(100, round((1 - di / dt) * 100)))
     except Exception:  # noqa: BLE001
         return None
+
 
 
 def get_mem():
@@ -261,9 +267,34 @@ def index():
     )
 
 
+@app.route("/stats")
+def stats():
+    """Live system stats as JSON for the page poller (CPU, RAM, services,
+    interfaces). Mirrors the values rendered into the page at load time so the
+    readouts can be refreshed in place without a full reload."""
+    used_mb, total_mb = get_mem()
+    return jsonify(
+        {
+            "cpu_pct": get_cpu_percent(),
+            "mem_used": used_mb,
+            "mem_total": total_mb,
+            "services": {
+                "takserver": get_service_status("takserver"),
+                "mediamtx": get_service_status("mediamtx"),
+                "mumble-server": get_service_status("mumble-server"),
+                "rnsd": get_service_status("rnsd"),
+                "meshchatx": get_service_status("meshchatx"),
+                "tailscale": "Running" if tailscale.status().get("logged_in") else "Stopped",
+            },
+            "interfaces": get_interfaces(),
+        }
+    )
+
+
 @app.route("/download/datapackage")
 
 def download_datapackage():
+
     """Stream the staged intermediate CA truststore (caCert.p12) directly."""
     if not datapackage.ca_available():
         abort(503, "TAK CA not staged yet. Run scripts/refresh_tak_cert.sh.")
