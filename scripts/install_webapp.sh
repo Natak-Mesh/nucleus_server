@@ -47,7 +47,8 @@ fi
 echo "==> Deploying source to $DEPLOY_DIR ..."
 mkdir -p "$DEPLOY_DIR"
 cp -r "$SRC_DIR/app.py" "$SRC_DIR/datapackage.py" "$SRC_DIR/templates" \
-      "$SRC_DIR/requirements.txt" "$DEPLOY_DIR/"
+      "$SRC_DIR/static" "$SRC_DIR/requirements.txt" "$DEPLOY_DIR/"
+
 
 
 # --- Create / update the venv ---

@@ -14,7 +14,16 @@
             margin: 0;
             padding: 1.5rem;
         }
+        .header-row { display: flex; align-items: center; gap: 1rem; }
+        .header-row .header-text { flex: 0 0 auto; min-width: 0; }
+        .overlay-wrap { flex: 1 1 auto; min-width: 0; align-self: stretch; position: relative; }
+        .overlay-top { position: absolute; top: 0; bottom: 0; left: 50%; transform: translateX(-50%); height: 100%; width: auto; max-width: 100%; object-fit: contain; }
+
+
+
         h1 { font-size: 1.4rem; margin: 0 0 0.25rem 0; color: #4fc3f7; }
+
+
         h2 {
             font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em;
             color: #8b9bb4; margin: 2rem 0 0.75rem 0;
@@ -98,13 +107,22 @@
     </style>
 </head>
 <body>
-    <h1>{{ hostname }}</h1>
-    <div class="sub">Nucleus Server</div>
+    <div class="header-row">
+        <div class="header-text">
+            <h1>{{ hostname }}</h1>
+            <div class="sub">Nucleus Server</div>
 
-    <div class="mdns">
-        <span class="label">mDNS (.local):</span>
-        <a href="http://{{ mdns_name }}">{{ mdns_name }}</a>
+            <div class="mdns">
+                <span class="label">mDNS (.local):</span>
+                <a href="http://{{ mdns_name }}">{{ mdns_name }}</a>
+            </div>
+        </div>
+        <div class="overlay-wrap">
+            <img class="overlay-top" src="{{ url_for('static', filename='NatakMeshsecondary-overlay.png') }}" alt="NatakMesh">
+        </div>
     </div>
+
+
 
     <!-- ===================== System ===================== -->
     <h2>System</h2>
