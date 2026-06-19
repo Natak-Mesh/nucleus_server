@@ -56,6 +56,23 @@ hardware.
 > gating item is the real-device ATAK enrollment test (WS5.3), which cannot be
 > done from the box.** The sections below have been reconciled to this run.
 
+> **UPDATE 2026-06-18 (download button = intermediate cert only, NOT a full
+> data package):** The "Download CA certificate" button no longer serves a full
+> ATAK/WinTAK data package — it now streams **only the intermediate CA
+> truststore (`caCert.p12`)**. Reason: the full data package baked the server
+> host into the `.pref` (`connectString0=<host>:8089:ssl`) derived from the
+> address the package was fetched from, so it was only valid when downloaded
+> from the **AP IP**; pulled from any other address (mDNS name, LAN IP,
+> Tailscale, etc.) the package pointed at the wrong host and auto-enroll failed.
+> Serving the bare intermediate cert removes that host-dependency. **The user
+> now installs the cert and configures the TAK server connection manually**
+> (host/port `8089`/SSL + credentials). `app.py`'s `/download/datapackage` route
+> returns the cert directly (`application/x-pkcs12`, `filename="caCert.p12"`);
+> the on-page copy was updated to match. `datapackage.py` (the full-package /
+> `.pref` / manifest builder) remains in the repo but is **no longer used by the
+> live route** (dormant). This supersedes the WS5.2 "manifest/pref" discussion
+> and the "bundle the truststore in the package" decision below.
+
 ### What I (this assistant) actually changed this session
 - **`README.md`** — only file I edited. Three edits: rewrote/expanded the body,
   removed a stray blank line that split the services table, removed a double

@@ -169,8 +169,9 @@
     <h2>Join TAK</h2>
     <div class="pkg">
         {% if datapackage_ready %}
-            <p>Download this server's <strong>ATAK/WinTAK data package</strong>, import it on
-            your device, then log in with your username &amp; password to auto-enroll.</p>
+            <p>Download this server's <strong>intermediate CA certificate</strong> and install it
+            on your device. This is the trust cert only &mdash; you'll still need to
+            <strong>set up the TAK server connection manually</strong> and log in.</p>
             <button id="pkg-dl" class="btn" type="button">Download CA certificate &darr;</button>
 
             <span id="pkg-dl-msg" class="muted" style="margin-left:0.5rem;"></span>
