@@ -46,8 +46,10 @@ fi
 # --- Deploy source to /opt ---
 echo "==> Deploying source to $DEPLOY_DIR ..."
 mkdir -p "$DEPLOY_DIR"
-cp -r "$SRC_DIR/app.py" "$SRC_DIR/datapackage.py" "$SRC_DIR/templates" \
-      "$SRC_DIR/static" "$SRC_DIR/requirements.txt" "$DEPLOY_DIR/"
+cp -r "$SRC_DIR/app.py" "$SRC_DIR/datapackage.py" "$SRC_DIR/tailscale.py" \
+      "$SRC_DIR/templates" "$SRC_DIR/static" "$SRC_DIR/requirements.txt" \
+      "$DEPLOY_DIR/"
+
 
 
 
@@ -56,14 +58,32 @@ if [ ! -d "$DEPLOY_DIR/.venv" ]; then
     echo "==> Creating Python venv ..."
     python3 -m venv "$DEPLOY_DIR/.venv"
 fi
-echo "==> Installing dependencies (flask, waitress) ..."
+echo "==> Installing dependencies (flask, waitress, segno) ..."
+
 "$DEPLOY_DIR/.venv/bin/pip" install --upgrade pip >/dev/null
 "$DEPLOY_DIR/.venv/bin/pip" install -r "$DEPLOY_DIR/requirements.txt"
 
 # --- Ownership ---
 chown -R "$RUN_USER":"$RUN_USER" "$DEPLOY_DIR"
 
+# --- Tailscale ---
+# NOTE: We do NOT use `tailscale set --operator` here. Operator access only
+# works once a profile already exists, so a logged-out node can never bootstrap
+# a login through it (the CLI returns "profiles access denied"). Instead the
+# web app calls tailscale via `sudo -n` against the scoped sudoers rule below,
+# which works regardless of login state.
+TAILSCALE_BIN="$(command -v tailscale || true)"
+if [ -z "$TAILSCALE_BIN" ]; then
+    echo "==> NOTE: tailscale not installed; the web app's Tailscale panel will"
+    echo "    appear once Tailscale is installed (run setup_nucleus.sh)."
+    # Fall back to the conventional path so the sudoers rule is still written;
+    # it simply won't match anything until tailscale is installed there.
+    TAILSCALE_BIN="/usr/bin/tailscale"
+fi
+
+
 # --- Secrets file (created by setup_nucleus.sh; ensure it at least exists) ---
+
 SECRETS_FILE="/etc/nucleus/secrets"
 if [ ! -f "$SECRETS_FILE" ]; then
     echo "==> NOTE: $SECRETS_FILE not found yet."
@@ -74,7 +94,10 @@ if [ ! -f "$SECRETS_FILE" ]; then
 fi
 
 # --- Sudoers rule: allow the web app user to control ONLY these services ---
-# Tightly scoped: exact systemctl verbs + exact unit names, nothing else.
+# Tightly scoped: exact systemctl verbs + exact unit names, plus the specific
+# (non-destructive) tailscale subcommands the admin zone uses. Note: NO
+# `tailscale logout` — that wipes node credentials and is intentionally never
+# permitted from the web app.
 SUDOERS_FILE="/etc/sudoers.d/nucleus-webapp"
 echo "==> Installing sudoers rule: $SUDOERS_FILE ..."
 cat > "$SUDOERS_FILE" <<EOF
@@ -94,7 +117,20 @@ ${RUN_USER} ALL=(root) NOPASSWD: \\
     /usr/bin/systemctl restart rnsd, \\
     /usr/bin/systemctl start nucleus-webapp, \\
     /usr/bin/systemctl restart nucleus-webapp
+
+# Allow the Nucleus web app to manage Tailscale (status, interactive login,
+# connect/disconnect, and switching between already-logged-in tailnets).
+# Deliberately excludes 'logout' so credentials can never be wiped from the UI.
+${RUN_USER} ALL=(root) NOPASSWD: \\
+    ${TAILSCALE_BIN} status, \\
+    ${TAILSCALE_BIN} status *, \\
+    ${TAILSCALE_BIN} login, \\
+    ${TAILSCALE_BIN} up, \\
+    ${TAILSCALE_BIN} down, \\
+    ${TAILSCALE_BIN} switch *, \\
+    ${TAILSCALE_BIN} switch --list
 EOF
+
 chmod 0440 "$SUDOERS_FILE"
 # Validate before leaving it in place (a bad sudoers file can lock out sudo).
 VISUDO_BIN="$(command -v visudo || echo /usr/sbin/visudo)"
@@ -122,7 +158,6 @@ Restart=on-failure
 RestartSec=3
 # Allow binding privileged port 80 without full root
 AmbientCapabilities=CAP_NET_BIND_SERVICE
-CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 # Load the per-unit secrets (ADMIN_PIN, MUMBLE_SUPERUSER_PW) as environment
 # variables. systemd reads this as root before dropping to ${RUN_USER}, so the
 # web app gets the values without the file being world-readable. '-' => the

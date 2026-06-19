@@ -30,6 +30,7 @@ from flask import (
     Flask,
     Response,
     abort,
+    jsonify,
     redirect,
     render_template,
     request,
@@ -38,6 +39,8 @@ from flask import (
 )
 
 import datapackage
+import tailscale
+
 
 app = Flask(__name__)
 # Ephemeral session key — fine for a single-process field appliance. Sessions
@@ -230,7 +233,10 @@ def index():
         is_admin=is_admin(),
         managed_services=MANAGED_SERVICES,
         mumble_pw=MUMBLE_PW,
+        ts_status=tailscale.status(),
+        ts_profiles=tailscale.list_profiles() if is_admin() else [],
     )
+
 
 
 @app.route("/download/datapackage")
@@ -289,7 +295,74 @@ def admin_service():
     return redirect(url_for("index"))
 
 
+# --------------------------------------------------------------------------
+# Routes — admin / Tailscale
+# --------------------------------------------------------------------------
+@app.route("/admin/tailscale/login", methods=["POST"])
+def admin_tailscale_login():
+    """Kick off an interactive `tailscale up` in the background."""
+    if not is_admin():
+        abort(403)
+    tailscale.start_login()
+    return redirect(url_for("index"))
+
+
+@app.route("/admin/tailscale/status")
+def admin_tailscale_status():
+    """JSON status for the page poller (state, auth URL, profiles)."""
+    if not is_admin():
+        abort(403)
+    info = tailscale.status()
+    auth_url = tailscale.get_auth_url()
+    return jsonify(
+        {
+            **info,
+            "auth_url": auth_url,
+            "auth_url_qr": qr_svg(auth_url) if auth_url else None,
+            "login_in_progress": tailscale.login_in_progress(),
+            "profiles": tailscale.list_profiles(),
+        }
+    )
+
+
+@app.route("/admin/tailscale/switch", methods=["POST"])
+def admin_tailscale_switch():
+    """Switch to an already-logged-in profile/tailnet by id."""
+    if not is_admin():
+        abort(403)
+    profile_id = request.form.get("profile_id", "")
+    # Validate against the live list so this is never arbitrary input.
+    valid_ids = {p["id"] for p in tailscale.list_profiles()}
+    if profile_id not in valid_ids:
+        abort(400, "Unknown Tailscale profile.")
+    tailscale.switch_profile(profile_id)
+    return redirect(url_for("index"))
+
+
+@app.route("/admin/tailscale/action", methods=["POST"])
+def admin_tailscale_action():
+    """
+    Connection control: up (reconnect) or down (disconnect).
+
+    Note: there is NO logout action. Logging out wipes the node's stored
+    credentials and forces a full browser re-auth, so it is intentionally not
+    exposed in the web UI.
+    """
+    if not is_admin():
+        abort(403)
+    action = request.form.get("action", "")
+    if action == "up":
+        tailscale.up()
+    elif action == "down":
+        tailscale.down()
+    else:
+        abort(400, "Invalid action.")
+    return redirect(url_for("index"))
+
+
+
 if __name__ == "__main__":
+
     try:
         from waitress import serve
 

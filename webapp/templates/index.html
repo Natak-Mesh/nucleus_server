@@ -97,6 +97,21 @@
         .secret { font-family: "SF Mono", Menlo, Consolas, monospace; color: #ffd54f; word-break: break-all; }
         form.inline { display: inline; margin: 0; }
 
+        /* tailscale */
+        .ts-box { margin-top: 1rem; padding: 0.9rem; background: #15233a; border: 1px solid #284064; border-radius: 8px; }
+        .ts-head { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.5rem; }
+        .ts-head .name { font-weight: 600; color: #fff; }
+        .ts-detail { font-size: 0.85rem; color: #a9b7cc; margin-bottom: 0.5rem; }
+        .ts-detail .label { color: #8b9bb4; }
+        .ts-auth { margin: 0.5rem 0; }
+        .ts-auth p { font-size: 0.8rem; margin: 0 0 0.5rem 0; }
+        .ts-auth .qrcard svg { width: 100%; height: auto; background: #fff; border-radius: 4px; padding: 4px; }
+        .ts-profiles { margin-top: 0.6rem; }
+        .ts-profiles .label { display: block; color: #8b9bb4; margin-bottom: 0.3rem; }
+        .running { color: #81c784; font-weight: 600; }
+        .stopped { color: #e57373; font-weight: 600; }
+
+
         .footer { margin-top: 1.5rem; color: #5a6678; font-size: 0.75rem; }
 
         @media (max-width: 480px) {
@@ -258,7 +273,82 @@
                 <span class="name">Mumble SuperUser</span>
                 <span class="secret">{{ mumble_pw if mumble_pw else '(unset)' }}</span>
             </div>
+
+            <!-- Tailscale -->
+            {% if ts_status.available %}
+            <div class="ts-box" id="ts-box">
+                <div class="ts-head">
+                    <span class="name">Tailscale</span>
+                    <span id="ts-state"
+                          class="{% if ts_status.logged_in %}running{% else %}stopped{% endif %}">
+                        {{ ts_status.state }}
+                    </span>
+                </div>
+                <div class="ts-detail" id="ts-detail">
+                    {% if ts_status.tailnet %}
+                    <div><span class="label">Tailnet:</span> <span class="mono" id="ts-tailnet">{{ ts_status.tailnet }}</span></div>
+                    {% endif %}
+                    {% if ts_status.ip %}
+                    <div><span class="label">IP:</span> <span class="ip" id="ts-ip">{{ ts_status.ip }}</span></div>
+                    {% endif %}
+                </div>
+
+                <!-- Pending login auth link + QR (populated by the poller) -->
+                <div class="ts-auth" id="ts-auth" style="display:none;">
+                    <p class="muted">Scan or open this link to authenticate, then this panel updates automatically:</p>
+                    <a id="ts-auth-link" class="btn" target="_blank" rel="noopener">Open login &rarr;</a>
+                    <div class="qrcard" id="ts-auth-qr" style="max-width:160px;margin-top:0.6rem;"></div>
+                </div>
+
+                <!-- Controls. Note: no "Log out" button — logging out wipes
+                     this node's credentials and forces a full re-auth, so it
+                     is intentionally not exposed here. -->
+                <div class="ctl-row" style="border:none;padding-top:0.6rem;">
+                    {% if ts_status.logged_in %}
+                        <form class="inline" method="post" action="/admin/tailscale/action">
+                            <input type="hidden" name="action" value="down">
+                            <button class="btn ghost" type="submit">Disconnect</button>
+                        </form>
+                    {% else %}
+                        <form class="inline" method="post" action="/admin/tailscale/action">
+                            <input type="hidden" name="action" value="up">
+                            <button class="btn" type="submit">Reconnect</button>
+                        </form>
+                    {% endif %}
+                    <!-- Always available: add / log into another tailnet. Uses
+                         `tailscale login`, which adds a profile without
+                         disconnecting the current one. -->
+                    <form class="inline" method="post" action="/admin/tailscale/login">
+                        <button class="btn" type="submit" id="ts-connect">Log into another tailnet</button>
+                    </form>
+                </div>
+
+
+                <!-- Tailnet / profile switcher -->
+                {% if ts_profiles %}
+                <div class="ts-profiles">
+                    <span class="label">Tailnets / accounts</span>
+                    {% for p in ts_profiles %}
+                    <div class="ctl-row">
+                        <span class="name">{{ p.tailnet or p.account }}</span>
+                        <span class="mono" style="color:#5a6678;">{{ p.account }}</span>
+                        {% if p.current %}
+                            <span class="running">current</span>
+                        {% else %}
+                            <form class="inline" method="post" action="/admin/tailscale/switch">
+                                <input type="hidden" name="profile_id" value="{{ p.id }}">
+                                <button class="btn ghost" type="submit">Switch</button>
+                            </form>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                </div>
+                {% endif %}
+            </div>
+            {% endif %}
+
             <form class="inline" method="post" action="/admin/logout">
+
                 <button class="btn ghost" type="submit">Lock admin</button>
             </form>
         {% endif %}
@@ -314,6 +404,67 @@
             });
         })();
 
+        // Tailscale: when a login is kicked off, poll the status endpoint to
+        // surface the auth URL (link + QR). Once connected, reload so the panel
+        // reflects the new state (tailnet, IP, profile list).
+        (function () {
+            var box = document.getElementById("ts-box");
+            if (!box) { return; }  // not admin or tailscale not installed
+
+            var authWrap = document.getElementById("ts-auth");
+            var authLink = document.getElementById("ts-auth-link");
+            var authQr = document.getElementById("ts-auth-qr");
+            var stateEl = document.getElementById("ts-state");
+            var wasLoggedIn = stateEl && stateEl.classList.contains("running");
+            var timer = null;
+
+            function poll() {
+                fetch("admin/tailscale/status", { credentials: "same-origin" })
+                    .then(function (resp) { return resp.ok ? resp.json() : null; })
+                    .then(function (data) {
+                        if (!data) { return; }
+
+                        if (stateEl) { stateEl.textContent = data.state; }
+
+                        // Show the pending auth URL + QR if one is available.
+                        if (data.auth_url) {
+                            authWrap.style.display = "";
+                            authLink.href = data.auth_url;
+                            if (data.auth_url_qr) { authQr.innerHTML = data.auth_url_qr; }
+                        } else {
+                            authWrap.style.display = "none";
+                        }
+
+                        // Reload once we transition into a connected state so the
+                        // server re-renders tailnet/IP/profile details.
+                        if (data.logged_in && !wasLoggedIn) {
+                            window.location.reload();
+                            return;
+                        }
+
+                        // Keep polling while a login is in flight or an auth URL
+                        // is still pending.
+                        if (data.login_in_progress || data.auth_url) {
+                            timer = setTimeout(poll, 2000);
+                        }
+                    })
+                    .catch(function () { timer = setTimeout(poll, 4000); });
+            }
+
+            // Start polling immediately if a login is already pending on load;
+            // otherwise start it when the operator clicks Connect.
+            var connectForm = box.querySelector('form[action="/admin/tailscale/login"]');
+            if (connectForm) {
+                connectForm.addEventListener("submit", function () {
+                    // Let the POST go through; begin polling shortly after.
+                    setTimeout(poll, 1500);
+                });
+            }
+            // Kick off a poll on load to catch an in-progress login.
+            poll();
+        })();
+
     </script>
+
 </body>
 </html>
