@@ -409,6 +409,11 @@ cat > "$RNSD_SERVICE" <<EOF
 [Unit]
 Description=Reticulum Network Stack Daemon
 After=network.target
+# Stop retrying after 5 failed starts within 60s; otherwise a fatal config
+# error (e.g. a bad interface) would crash-loop forever. After the limit the
+# unit parks in "failed" state, which the web UI reports correctly.
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -416,6 +421,7 @@ User=${TARGET_USER}
 ExecStart=${RNSD_BIN}
 Restart=on-failure
 RestartSec=5
+
 
 [Install]
 WantedBy=multi-user.target
