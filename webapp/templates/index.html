@@ -204,13 +204,14 @@
         {% if qr_wifi %}
         <div class="qrcard"><span class="label">Join WiFi</span>{{ qr_wifi | safe }}</div>
         {% endif %}
-        {% if qr_tak %}
-        <div class="qrcard"><span class="label">TAK Web UI</span>{{ qr_tak | safe }}</div>
-        {% endif %}
-        {% if qr_pkg and datapackage_ready %}
-        <div class="qrcard"><span class="label">Data Package</span>{{ qr_pkg | safe }}</div>
+        {% if qr_share %}
+        <div class="qrcard">
+            <span class="label">Open Web UI</span>{{ qr_share | safe }}
+            <span class="label" style="margin-top:0.4rem;font-family:'SF Mono',Menlo,Consolas,monospace;text-transform:none;letter-spacing:0;color:#5a6678;word-break:break-all;">{{ share_url }}</span>
+        </div>
         {% endif %}
     </div>
+
 
     <!-- ===================== Network ===================== -->
     <h2>Network Interfaces</h2>

@@ -101,6 +101,7 @@ def get_hostname():
 
 
 def get_mdns_name():
+
     """Return the avahi-advertised mDNS name (e.g. "nucleus-server.local")."""
     name = get_hostname()
     try:
@@ -182,16 +183,24 @@ def get_mem():
 # QR codes (pure-python via segno; degrade gracefully if missing)
 # --------------------------------------------------------------------------
 def qr_svg(data, scale=4):
-    """Return an inline SVG string for `data`, or None if segno is missing."""
+    """Return an inline SVG string for `data`, or None if segno is missing.
+
+    Note: segno's SVG writer emits *bytes*, so we serialize into a BytesIO and
+    decode to str. (Using StringIO raises "string argument expected, got
+    'bytes'" on segno >= 1.6, which silently produced no QR codes.)
+    """
+    if not data:
+        return None
     try:
         import segno
         import io
 
-        buf = io.StringIO()
+        buf = io.BytesIO()
         segno.make(data, error="m").save(buf, kind="svg", scale=scale, border=2)
-        return buf.getvalue()
+        return buf.getvalue().decode("utf-8")
     except Exception:  # noqa: BLE001
         return None
+
 
 
 def wifi_join_string(ssid):
@@ -214,6 +223,11 @@ def index():
     hostname = get_hostname()
     mdns = get_mdns_name()
     used_mb, total_mb = get_mem()
+    # "Share this page" QR: encode the exact address THIS viewer used to reach
+    # the page (request.host includes host:port). Works whether they arrived
+    # via the AP gateway IP or a dynamic LAN DHCP address, so a colleague on the
+    # same network can scan and land on the same dashboard — no guessing.
+    share_url = f"http://{request.host}/"
     return render_template(
         "index.html",
         hostname=hostname,
@@ -228,8 +242,9 @@ def index():
         mem_total=total_mb,
         datapackage_ready=datapackage.ca_available(),
         qr_wifi=qr_svg(wifi_join_string(hostname)),
-        qr_tak=qr_svg(f"https://{mdns}:8443"),
-        qr_pkg=qr_svg(f"http://{mdns}/download/datapackage"),
+        qr_share=qr_svg(share_url),
+        share_url=share_url,
+
         is_admin=is_admin(),
         managed_services=MANAGED_SERVICES,
         mumble_pw=MUMBLE_PW,
@@ -238,8 +253,8 @@ def index():
     )
 
 
-
 @app.route("/download/datapackage")
+
 def download_datapackage():
     """Stream the staged intermediate CA truststore (caCert.p12) directly."""
     if not datapackage.ca_available():
