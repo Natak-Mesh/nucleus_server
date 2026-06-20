@@ -95,11 +95,11 @@ The WiFi AP is configured automatically per-device:
 - **Interface**: Auto-detected (first wireless adapter found), or pass explicitly via argument
 - **SSID**: Derived from the system hostname (each unit gets a unique SSID)
 - **Subnet**: Each unit runs its own `10.30.x.x` subnet; the server is the gateway and DHCP server for its WiFi clients
-- **Config templates**: `system/hostapd.conf.template` and `system/10-ap.network.template` contain `__IFACE__` and `__SSID__` placeholders that are filled in at setup time
+- **Config templates**: `system/hostapd.conf.template` and `system/10-ap.network.template` contain `__IFACE__`, `__SSID__`, and `__OCTET__` (subnet) placeholders that are filled in at setup time
 
 > **UFW Note:** The setup scripts automatically add rules to `/etc/ufw/before.rules`:
 > 1. **AP traffic** — allows all inbound traffic on the WiFi AP interface (required because UFW's default rules drop DHCP).
-> 2. **NAT masquerade** — adds a `*nat` table that masquerades traffic from the AP subnet out through `eth0`, giving WiFi clients internet access.
+> 2. **NAT masquerade** — adds a `*nat` table that masquerades traffic from the AP subnet out through the auto-detected WAN interface (taken from the default route, or passed explicitly), giving WiFi clients internet access.
 >
 > IP forwarding is enabled via `/etc/sysctl.d/99-ip-forward.conf` and DNS servers (`1.1.1.1`, `8.8.8.8`) are provided to clients via DHCP.
 
@@ -112,7 +112,8 @@ The WiFi AP is configured automatically per-device:
 | `scripts/install_mumble.sh` | Mumble server only |
 | `scripts/install_webapp.sh` | Flask info web app |
 | `scripts/install_meshchatx.sh` | Reticulum MeshChatX headless web UI (port 8000) |
-| `scripts/setup_ap.sh` | WiFi access point (hostapd) + internet sharing (NAT via eth0) |
+| `scripts/setup_ap.sh` | WiFi access point (hostapd) + internet sharing (NAT via the auto-detected WAN interface) |
+| `scripts/refresh_tak_cert.sh` | Stage the public TAK intermediate CA truststore so the web app can build client data packages |
 
 ### `setup_ap.sh` Usage
 
@@ -120,14 +121,19 @@ The WiFi AP is configured automatically per-device:
 # Interactive — lists all detected wireless interfaces and prompts for confirmation
 sudo bash /home/natak/nucleus_server/scripts/setup_ap.sh
 
-# Skip the prompt — specify the interface directly
+# Skip the interface prompt — specify the wireless interface directly
 sudo bash /home/natak/nucleus_server/scripts/setup_ap.sh wlx00c0cab6c5ba
+
+# Also specify the WAN/uplink interface for NAT (otherwise auto-detected from the default route)
+sudo bash /home/natak/nucleus_server/scripts/setup_ap.sh wlx00c0cab6c5ba enp1s0
 ```
 
 When run without arguments, the script will:
 1. Scan for all wireless interfaces and display them with driver and MAC info
 2. Prompt you to confirm the default selection, pick a different one by number, or type an interface name
-3. Proceed with the chosen interface
+3. Prompt for the AP subnet's third octet (`10.30.X.1`) — this is always asked, even when the interface is passed as an argument, so each unit gets its own subnet
+4. Auto-detect the WAN/uplink interface from the default route (or use the one you passed) for NAT internet sharing
+5. Proceed with the chosen interfaces
 
 Example output:
 ```

@@ -17,7 +17,8 @@ sudo bash nucleus_server/scripts/install_webapp.sh
 ```
 
 This deploys the source to `/opt/nucleus-webapp`, creates a venv, installs
-dependencies (flask, waitress), and enables + starts the service.
+dependencies (flask, waitress, segno — segno renders the QR codes), and
+enables + starts the service.
 
 Firewall: the app needs port 80 open in UFW (see build guide section 8.1).
 
