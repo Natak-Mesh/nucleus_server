@@ -106,6 +106,21 @@ if [ ! -d "/sys/class/net/${AP_IFACE}" ]; then
     exit 1
 fi
 
+# ---- Prompt for the AP subnet third octet (mandatory, no default) ----
+# The AP address becomes 10.30.<octet>.1/24. There is intentionally no default:
+# every unit must have an explicitly chosen subnet, so we loop until a valid
+# octet (0-255) is entered.
+AP_OCTET=""
+while true; do
+    echo -n "Enter AP subnet third octet (10.30.X.1): "
+    read -r AP_OCTET
+    if [[ "$AP_OCTET" =~ ^[0-9]+$ ]] && [ "$AP_OCTET" -ge 0 ] && [ "$AP_OCTET" -le 255 ]; then
+        break
+    fi
+    echo "  Invalid entry. Enter a number from 0 to 255."
+done
+echo "  -> AP subnet: 10.30.${AP_OCTET}.0/24 (server at 10.30.${AP_OCTET}.1)"
+
 # ---- Derive SSID from hostname ----
 AP_SSID="$(hostname)"
 
@@ -187,8 +202,10 @@ if [ ! -f "$NETWORK_TEMPLATE" ]; then
     echo "ERROR: Template not found: $NETWORK_TEMPLATE"
     exit 1
 fi
-sed "s/__IFACE__/${AP_IFACE}/g" "$NETWORK_TEMPLATE" > /etc/systemd/network/10-ap.network
-echo "  -> Generated /etc/systemd/network/10-ap.network (Name=$AP_IFACE)"
+sed -e "s/__IFACE__/${AP_IFACE}/g" \
+    -e "s/__OCTET__/${AP_OCTET}/g" \
+    "$NETWORK_TEMPLATE" > /etc/systemd/network/10-ap.network
+echo "  -> Generated /etc/systemd/network/10-ap.network (Name=$AP_IFACE, Address=10.30.${AP_OCTET}.1/24)"
 
 echo ""
 
@@ -272,7 +289,9 @@ echo ""
 # ============================================================================
 echo "===> [8/8] Configuring NAT masquerade for internet sharing (-> $WAN_IFACE)"
 
-AP_SUBNET=$(grep '^Address=' /etc/systemd/network/10-ap.network | cut -d= -f2 | xargs)
+# Use the network address (e.g. 10.30.X.0/24), not the host address on the
+# Address= line (10.30.X.1/24), so the masquerade rule matches the whole subnet.
+AP_SUBNET="10.30.${AP_OCTET}.0/24"
 
 if [ -f "$UFW_BEFORE" ]; then
     if grep -q "NAT masquerade for WiFi AP internet sharing" "$UFW_BEFORE"; then
