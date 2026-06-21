@@ -270,7 +270,14 @@ UFW_BEFORE="/etc/ufw/before.rules"
 
 if [ -f "$UFW_BEFORE" ]; then
     if grep -q "Allow all traffic on WiFi AP interface" "$UFW_BEFORE"; then
-        echo "  -> UFW AP rule already present."
+        # Rule block exists — make sure it points at the current AP interface.
+        CURRENT_AP_RULE=$(grep -A1 "Allow all traffic on WiFi AP interface" "$UFW_BEFORE" | grep -- '-A ufw-before-input' | head -1)
+        if echo "$CURRENT_AP_RULE" | grep -q -- "-i ${AP_IFACE} "; then
+            echo "  -> UFW AP rule already present (interface=$AP_IFACE)."
+        else
+            sed -i "/Allow all traffic on WiFi AP interface/{n;s/-A ufw-before-input -i [^ ]* -j ACCEPT/-A ufw-before-input -i ${AP_IFACE} -j ACCEPT/;}" "$UFW_BEFORE"
+            echo "  -> Updated UFW AP rule to use interface $AP_IFACE"
+        fi
     else
         # Insert the rule before the final COMMIT in the filter table
         sed -i "/^COMMIT/i # Allow all traffic on WiFi AP interface\\n-A ufw-before-input -i ${AP_IFACE} -j ACCEPT" "$UFW_BEFORE"
