@@ -41,6 +41,9 @@ from flask import (
 import datapackage
 import tailscale
 
+# Path to the webadmin certificate (TAK web UI admin login).
+WEBADMIN_CERT_PATH = os.path.expanduser("~/certs/webadmin.p12")
+
 
 app = Flask(__name__)
 # Ephemeral session key — fine for a single-process field appliance. Sessions
@@ -255,6 +258,7 @@ def index():
         mem_used=used_mb,
         mem_total=total_mb,
         datapackage_ready=datapackage.ca_available(),
+        webadmin_ready=os.path.isfile(WEBADMIN_CERT_PATH),
         qr_wifi=qr_svg(wifi_join_string(hostname)),
         qr_share=qr_svg(share_url),
         share_url=share_url,
@@ -308,6 +312,21 @@ def download_datapackage():
         headers={"Content-Disposition": 'attachment; filename="caCert.p12"'},
     )
 
+
+@app.route("/download/webadmin")
+def download_webadmin():
+    """Stream the staged webadmin certificate (webadmin.p12) directly."""
+    if not os.path.isfile(WEBADMIN_CERT_PATH):
+        abort(503, "WebAdmin certificate not staged yet.")
+
+    with open(WEBADMIN_CERT_PATH, "rb") as fh:
+        blob = fh.read()
+
+    return Response(
+        blob,
+        mimetype="application/x-pkcs12",
+        headers={"Content-Disposition": 'attachment; filename="webadmin.p12"'},
+    )
 
 
 # --------------------------------------------------------------------------
