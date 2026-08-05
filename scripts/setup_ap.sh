@@ -114,7 +114,12 @@ AP_OCTET=""
 while true; do
     echo -n "Enter AP subnet third octet (10.30.X.1): "
     read -r AP_OCTET
-    if [[ "$AP_OCTET" =~ ^[0-9]+$ ]] && [ "$AP_OCTET" -ge 0 ] && [ "$AP_OCTET" -le 255 ]; then
+    if [[ "$AP_OCTET" =~ ^[0-9]+$ ]] && [ "$((10#$AP_OCTET))" -ge 0 ] && [ "$((10#$AP_OCTET))" -le 255 ]; then
+        # Strip leading zeros. "03" must become "3": systemd-networkd rejects
+        # Address=10.30.03.1/24 as an invalid argument, silently refuses to
+        # assign any address, and then disables the DHCP server entirely --
+        # clients associate to the SSID but never get an IP.
+        AP_OCTET="$((10#$AP_OCTET))"
         break
     fi
     echo "  Invalid entry. Enter a number from 0 to 255."
@@ -160,7 +165,7 @@ echo ""
 # ============================================================================
 # 1. Install packages
 # ============================================================================
-echo "===> [1/8] Installing packages (hostapd, iw, firmware-mediatek)"
+echo "===> [1/9] Installing packages (hostapd, iw, firmware-mediatek)"
 
 apt update -y
 
@@ -178,7 +183,7 @@ echo ""
 # ============================================================================
 # 2. Generate and deploy configuration files
 # ============================================================================
-echo "===> [2/8] Generating configuration files for $AP_IFACE"
+echo "===> [2/9] Generating configuration files for $AP_IFACE"
 
 # hostapd.conf — generate from template
 HOSTAPD_TEMPLATE="${REPO_DIR}/system/hostapd.conf.template"
@@ -212,7 +217,7 @@ echo ""
 # ============================================================================
 # 3. Set wireless regulatory domain
 # ============================================================================
-echo "===> [3/8] Setting wireless regulatory domain to US"
+echo "===> [3/9] Setting wireless regulatory domain to US"
 
 iw reg set US
 echo "  -> Regulatory domain set to US"
@@ -222,7 +227,7 @@ echo ""
 # ============================================================================
 # 4. Enable IP forwarding
 # ============================================================================
-echo "===> [4/8] Enabling IP forwarding"
+echo "===> [4/9] Enabling IP forwarding"
 
 SYSCTL_CONF="/etc/sysctl.d/99-ip-forward.conf"
 if [ -f "$SYSCTL_CONF" ] && grep -q 'net.ipv4.ip_forward=1' "$SYSCTL_CONF"; then
@@ -241,7 +246,7 @@ echo ""
 # ============================================================================
 # 5. Enable and start systemd-networkd
 # ============================================================================
-echo "===> [5/8] Enabling systemd-networkd"
+echo "===> [5/9] Enabling systemd-networkd"
 
 systemctl enable systemd-networkd
 systemctl restart systemd-networkd
@@ -252,7 +257,7 @@ echo ""
 # ============================================================================
 # 6. Unmask, enable, and start hostapd
 # ============================================================================
-echo "===> [6/8] Starting hostapd"
+echo "===> [6/9] Starting hostapd"
 
 systemctl unmask hostapd 2>/dev/null || true
 systemctl enable hostapd
@@ -264,9 +269,30 @@ echo ""
 # ============================================================================
 # 7. UFW — allow all traffic on the AP interface
 # ============================================================================
-echo "===> [7/8] Configuring UFW for AP interface"
+echo "===> [7/9] Configuring UFW for AP interface"
 
 UFW_BEFORE="/etc/ufw/before.rules"
+
+# Purge stale user rules left behind by a previous WiFi dongle. When the adapter
+# is swapped the interface name changes (it is derived from the MAC), so old
+# "allow 67/udp on wlxOLD" and "route allow ... on wlanN" rules linger while the
+# new interface has no rule at all. With ufw's default deny-incoming policy the
+# DHCP requests are then dropped and clients get no IP -- the AP looks alive but
+# hands out nothing. Delete anything bound to a wireless iface that is not the
+# one we are configuring now.
+if command -v ufw >/dev/null 2>&1; then
+    while read -r STALE_IFACE; do
+        [ -z "$STALE_IFACE" ] && continue
+        [ "$STALE_IFACE" = "$AP_IFACE" ] && continue
+        echo "  -> Removing stale UFW rules for old interface: $STALE_IFACE"
+        ufw --force delete allow in on "$STALE_IFACE" to any port 67 proto udp 2>/dev/null || true
+        ufw --force delete allow in on "$STALE_IFACE" 2>/dev/null || true
+        ufw --force delete route allow in on "$STALE_IFACE" out on "$WAN_IFACE" 2>/dev/null || true
+        ufw --force delete allow in on "$STALE_IFACE" to any port 67 proto udp 2>/dev/null || true
+    done < <(ufw status 2>/dev/null \
+             | grep -oE 'on (wlx[0-9a-f]+|wlan[0-9]+|wl[a-z0-9]+)' \
+             | awk '{print $2}' | sort -u)
+fi
 
 if [ -f "$UFW_BEFORE" ]; then
     if grep -q "Allow all traffic on WiFi AP interface" "$UFW_BEFORE"; then
@@ -289,12 +315,20 @@ else
     echo "  -> UFW not found, skipping."
 fi
 
+# Belt-and-braces: also add an explicit user rule permitting DHCP on the AP
+# interface. before.rules covers this, but the explicit rule makes the intent
+# visible in "ufw status" and survives a before.rules reset.
+if command -v ufw >/dev/null 2>&1; then
+    ufw allow in on "$AP_IFACE" to any port 67 proto udp >/dev/null 2>&1 || true
+    echo "  -> Allowed DHCP (67/udp) in on $AP_IFACE"
+fi
+
 echo ""
 
 # ============================================================================
 # 8. UFW — NAT masquerade (internet sharing via the WAN interface)
 # ============================================================================
-echo "===> [8/8] Configuring NAT masquerade for internet sharing (-> $WAN_IFACE)"
+echo "===> [8/9] Configuring NAT masquerade for internet sharing (-> $WAN_IFACE)"
 
 # Use the network address (e.g. 10.30.X.0/24), not the host address on the
 # Address= line (10.30.X.1/24), so the masquerade rule matches the whole subnet.
@@ -329,6 +363,80 @@ else
     echo "     You may need to manually configure iptables NAT."
 fi
 
+
+echo ""
+
+# ============================================================================
+# 9. Verify the AP actually came up
+# ============================================================================
+# Previously this script printed "Setup Complete!" unconditionally, even when
+# systemd-networkd had rejected the config and silently disabled the DHCP
+# server. The AP then broadcast its SSID and accepted associations while never
+# handing out an address, which is very hard to diagnose after the fact.
+# Fail loudly here instead.
+echo "===> [9/9] Verifying AP configuration"
+
+VERIFY_FAILED=0
+
+# Give networkd a moment to finish configuring the link.
+for _ in $(seq 1 10); do
+    if networkctl status "$AP_IFACE" 2>/dev/null | grep -q 'State: routable (configured)'; then
+        break
+    fi
+    sleep 1
+done
+
+# 1. The static address must actually be applied to the interface.
+EXPECTED_IP="10.30.${AP_OCTET}.1"
+if ip -4 addr show "$AP_IFACE" 2>/dev/null | grep -q "inet ${EXPECTED_IP}/24"; then
+    echo "  -> OK: $AP_IFACE has address ${EXPECTED_IP}/24"
+else
+    echo "  -> FAIL: $AP_IFACE does not have ${EXPECTED_IP}/24 assigned."
+    VERIFY_FAILED=1
+fi
+
+# 2. networkd must consider the link fully configured, not stuck "configuring".
+LINK_STATE=$(networkctl status "$AP_IFACE" 2>/dev/null | grep -E '^\s*State:' | head -1 | sed 's/.*State: //')
+if echo "$LINK_STATE" | grep -q 'routable (configured)'; then
+    echo "  -> OK: link state is routable (configured)"
+else
+    echo "  -> FAIL: link state is '${LINK_STATE:-unknown}' (expected 'routable (configured)')"
+    VERIFY_FAILED=1
+fi
+
+# 3. networkd must not have rejected anything in our config file.
+if journalctl -u systemd-networkd --since "5 minutes ago" --no-pager 2>/dev/null \
+   | grep -qE 'Failed to parse|no suitable static address|Disabling DHCP server'; then
+    echo "  -> FAIL: systemd-networkd reported config errors:"
+    journalctl -u systemd-networkd --since "5 minutes ago" --no-pager 2>/dev/null \
+        | grep -E 'Failed to parse|no suitable static address|Disabling DHCP server' \
+        | sed 's/^/       /'
+    VERIFY_FAILED=1
+fi
+
+# 4. hostapd must be running.
+if systemctl is-active --quiet hostapd; then
+    echo "  -> OK: hostapd is active"
+else
+    echo "  -> FAIL: hostapd is not active"
+    VERIFY_FAILED=1
+fi
+
+if [ "$VERIFY_FAILED" -ne 0 ]; then
+    echo ""
+    echo "============================================"
+    echo "  AP SETUP FAILED VERIFICATION"
+    echo "============================================"
+    echo ""
+    echo "The access point will NOT hand out IP addresses in this state."
+    echo "Inspect the config and logs:"
+    echo "  cat /etc/systemd/network/10-ap.network"
+    echo "  sudo journalctl -u systemd-networkd -n 50 --no-pager"
+    echo "  sudo networkctl status $AP_IFACE"
+    exit 1
+fi
+
+echo "  -> All checks passed."
 
 echo ""
 
