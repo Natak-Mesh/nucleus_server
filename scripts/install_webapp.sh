@@ -43,6 +43,25 @@ if [ ! -f "$SRC_DIR/app.py" ]; then
     exit 1
 fi
 
+# --- Free up port 80 (Apache) ---
+# Debian's "web server" tasksel option installs apache2, which binds *:80 and
+# serves its default page. The webapp would then fail to bind and crash-loop,
+# leaving http://<hostname>.local showing the Apache default page instead of the
+# Nucleus dashboard. Disable it (not purge — reversible, and leaves the config
+# in place) so the webapp owns port 80.
+if systemctl list-unit-files apache2.service &>/dev/null \
+   && [ -n "$(systemctl list-unit-files apache2.service --no-legend 2>/dev/null)" ]; then
+    echo "==> Apache2 detected — it conflicts with the web app on port 80."
+    echo "    Disabling and stopping apache2 (the package is left installed) ..."
+    systemctl disable --now apache2 2>/dev/null || true
+    echo "    NOTE: 'task-web-server' may still be installed; a future apt run"
+    echo "          could re-enable apache2. To remove it permanently:"
+    echo "            sudo apt purge apache2 task-web-server"
+else
+    echo "==> No apache2 present; port 80 is clear."
+fi
+
+
 # --- Deploy source to /opt ---
 echo "==> Deploying source to $DEPLOY_DIR ..."
 mkdir -p "$DEPLOY_DIR"

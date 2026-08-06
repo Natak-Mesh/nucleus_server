@@ -12,6 +12,7 @@
 #   5. Mumble Server  (low-latency VOIP for ATAK)
 #   6. Reticulum      (resilient mesh networking daemon)
 #   7. MeshChatX      (headless web UI for Reticulum)
+#   8. Web App        (Nucleus info dashboard on port 80)
 #
 # All services are enabled to auto-start on boot.
 # The script is idempotent — safe to re-run.
@@ -123,7 +124,7 @@ echo ""
 # ============================================================================
 # 1. Core Packages
 # ============================================================================
-echo "===> [1/7] Core packages (curl, pipx, iw, avahi-daemon)"
+echo "===> [1/8] Core packages (curl, pipx, iw, wifi firmware, avahi-daemon)"
 
 
 apt update -y
@@ -145,6 +146,20 @@ else
     echo "  -> Installing iw ..."
     apt install -y iw
 fi
+
+# Wireless firmware blobs. USB WiFi dongles get swapped often, and without the
+# matching firmware the kernel driver binds to the device but the probe fails,
+# so no wireless interface is ever created and the AP step has nothing to
+# configure. Install broadly up front (Realtek rtw88, MediaTek mt76, etc.).
+for fw in firmware-realtek firmware-mediatek firmware-misc-nonfree firmware-atheros; do
+    if dpkg -l "$fw" 2>/dev/null | grep -q '^ii'; then
+        echo "  -> $fw is already installed."
+    else
+        echo "  -> Installing $fw ..."
+        apt install -y "$fw" || echo "     WARNING: failed to install $fw (continuing)."
+    fi
+done
+
 
 
 # avahi-daemon for .local mDNS
@@ -172,7 +187,7 @@ echo ""
 # ============================================================================
 # 2. WiFi Access Point (hostapd + internet sharing)
 # ============================================================================
-echo "===> [2/7] WiFi Access Point (hostapd + internet sharing)"
+echo "===> [2/8] WiFi Access Point (hostapd + internet sharing)"
 echo "  -> Delegating to setup_ap.sh ..."
 
 bash "${SCRIPT_DIR}/setup_ap.sh"
@@ -183,7 +198,7 @@ echo ""
 # ============================================================================
 # 3. Tailscale
 # ============================================================================
-echo "===> [3/7] Tailscale (mesh VPN)"
+echo "===> [3/8] Tailscale (mesh VPN)"
 
 if command -v tailscale &>/dev/null; then
     echo "  -> Tailscale is already installed."
@@ -202,7 +217,7 @@ echo ""
 # ============================================================================
 # 4. MediaMTX
 # ============================================================================
-echo "===> [4/7] MediaMTX (media server)"
+echo "===> [4/8] MediaMTX (media server)"
 
 # Pinned MediaMTX version. The SHA256 is verified against every tarball
 # (downloaded or local) before install. To bump the version, update both
@@ -353,7 +368,7 @@ echo ""
 # ============================================================================
 # 5. Mumble Server
 # ============================================================================
-echo "===> [5/7] Mumble Server (VOIP)"
+echo "===> [5/8] Mumble Server (VOIP)"
 
 MUMBLE_PORT=64738
 # MUMBLE_SUPERUSER_PW is sourced from the per-unit secrets store near the top
@@ -387,7 +402,7 @@ echo ""
 # ============================================================================
 # 6. Reticulum (rns / rnsd)
 # ============================================================================
-echo "===> [6/7] Reticulum (mesh networking)"
+echo "===> [6/8] Reticulum (mesh networking)"
 
 # Install rns via pipx for the target user
 if sudo -u "$TARGET_USER" bash -lc 'command -v rnsd' &>/dev/null; then
@@ -436,7 +451,7 @@ echo ""
 # ============================================================================
 # 7. MeshChatX (headless web UI for Reticulum)
 # ============================================================================
-echo "===> [7/7] MeshChatX (Reticulum web UI)"
+echo "===> [7/8] MeshChatX (Reticulum web UI)"
 echo "  -> Delegating to install_meshchatx.sh ..."
 
 # Installs MeshChatX from its latest release wheel to /opt/meshchatx and runs
@@ -447,9 +462,26 @@ bash "${SCRIPT_DIR}/install_meshchatx.sh" "$TARGET_USER" || \
 echo ""
 
 # ============================================================================
-# 8. Stage TAK CA truststore for the web app (client data packages)
+# 8. Nucleus info web app (port 80)
 # ============================================================================
-echo "===> [8] Staging TAK CA truststore for client data packages"
+echo "===> [8/8] Nucleus info web app (dashboard on port 80)"
+echo "  -> Delegating to install_webapp.sh ..."
+
+# This is the primary way to find the box in the field (http://<hostname>.local),
+# so it must be part of the one-shot provisioning run. install_webapp.sh also
+# disables apache2 when present: Debian's "web server" tasksel option installs
+# it, and it squats on *:80 serving its own default page, which would otherwise
+# leave the dashboard unreachable.
+# Fatal on failure — without the dashboard the unit is effectively unfindable.
+bash "${SCRIPT_DIR}/install_webapp.sh"
+
+echo "  -> Web app setup complete."
+echo ""
+
+# ============================================================================
+# 9. Stage TAK CA truststore for the web app (client data packages)
+# ============================================================================
+echo "===> [9] Staging TAK CA truststore for client data packages"
 echo "  -> Delegating to refresh_tak_cert.sh ..."
 
 # Non-fatal: TAK may not be configured yet on first run. The webapp simply
@@ -481,6 +513,7 @@ echo "  mediamtx       RTSP :8554 | RTMP :1935 | HLS :8888 | WebRTC :8889"
 echo "  mumble-server  VOIP :${MUMBLE_PORT} (tcp+udp)"
 echo "  rnsd           Reticulum mesh daemon"
 echo "  meshchatx      Reticulum web UI  http://${HOSTNAME}.local:8000"
+echo "  nucleus-webapp Info dashboard    http://${HOSTNAME}.local"
 echo ""
 echo "  Per-unit secrets (stored in ${NUCLEUS_SECRETS_FILE}, root-only):"
 echo "  ─────────────────────────────────────────"

@@ -32,7 +32,60 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(dirname "$SCRIPT_DIR")"
 
+# ============================================================================
+# 1. Install packages (MUST run before interface discovery)
+# ============================================================================
+# This has to happen first. Without the right firmware blob the kernel driver
+# binds to the USB device but the probe fails, so no wireless netdev is ever
+# created -- and interface discovery below would abort with "No wireless
+# interfaces detected" before we ever got around to installing the firmware.
+# (Seen with a Realtek RTL8822BU dongle: rtw88_8822bu loaded, device bound, but
+# /lib/firmware/rtw88/rtw8822b_fw.bin absent -> no phy, no interface.)
+echo "===> [1/9] Installing packages (hostapd, iw, wireless firmware)"
+
+apt update -y
+
+FW_INSTALLED=0
+for pkg in hostapd iw firmware-realtek firmware-mediatek firmware-misc-nonfree firmware-atheros; do
+    if dpkg -l "$pkg" 2>/dev/null | grep -q '^ii'; then
+        echo "  -> $pkg is already installed."
+    else
+        echo "  -> Installing $pkg ..."
+        if apt install -y "$pkg"; then
+            case "$pkg" in
+                firmware-*) FW_INSTALLED=1 ;;
+            esac
+        else
+            echo "  -> WARNING: failed to install $pkg (continuing)."
+        fi
+    fi
+done
+
+# If firmware was just added, the driver already probed (and failed) without it.
+# Re-probe so the adapter comes up during this same run instead of requiring a
+# replug or reboot.
+if [ "$FW_INSTALLED" -eq 1 ]; then
+    echo "  -> New firmware installed; re-probing USB wireless devices ..."
+    for mod in $(lsmod | awk '/^(rtw88_[0-9a-z]+u|mt76x[0-9a-z]*u|rtl8[0-9a-z]+u|carl9170|ath9k_htc)\b/{print $1}'); do
+        modprobe -r "$mod" 2>/dev/null || true
+        modprobe "$mod" 2>/dev/null || true
+    done
+    udevadm trigger --subsystem-match=usb --action=add 2>/dev/null || true
+    udevadm settle 2>/dev/null || true
+
+    # Give the driver a few seconds to create the netdev.
+    for _ in $(seq 1 10); do
+        if compgen -G "/sys/class/net/*/wireless" >/dev/null; then
+            break
+        fi
+        sleep 1
+    done
+fi
+
+echo ""
+
 # ---- Discover all wireless interfaces ----
+
 WIFI_IFACES=()
 for iface_path in /sys/class/net/*/wireless; do
     if [ -d "$iface_path" ]; then
@@ -163,26 +216,9 @@ echo ""
 
 
 # ============================================================================
-# 1. Install packages
-# ============================================================================
-echo "===> [1/9] Installing packages (hostapd, iw, firmware-mediatek)"
-
-apt update -y
-
-for pkg in hostapd iw firmware-mediatek; do
-    if dpkg -l "$pkg" 2>/dev/null | grep -q '^ii'; then
-        echo "  -> $pkg is already installed."
-    else
-        echo "  -> Installing $pkg ..."
-        apt install -y "$pkg"
-    fi
-done
-
-echo ""
-
-# ============================================================================
 # 2. Generate and deploy configuration files
 # ============================================================================
+
 echo "===> [2/9] Generating configuration files for $AP_IFACE"
 
 # hostapd.conf — generate from template

@@ -107,12 +107,13 @@ The WiFi AP is configured automatically per-device:
 
 | Script | Purpose |
 |--------|---------|
-| `scripts/setup_nucleus.sh` | **Full setup** — installs all services in one shot |
+| `scripts/setup_nucleus.sh` | **Full setup** — installs all services (including the web app) in one shot |
 | `scripts/setup.sh` | Base packages + Tailscale + Reticulum only |
 | `scripts/install_mumble.sh` | Mumble server only |
-| `scripts/install_webapp.sh` | Flask info web app |
+| `scripts/install_webapp.sh` | Flask info web app (also disables apache2, which otherwise squats on port 80) |
 | `scripts/install_meshchatx.sh` | Reticulum MeshChatX headless web UI (port 8000) |
-| `scripts/setup_ap.sh` | WiFi access point (hostapd) + internet sharing (NAT via the auto-detected WAN interface) |
+| `scripts/setup_ap.sh` | WiFi access point (hostapd) + wireless firmware (Realtek/MediaTek/etc.) + internet sharing (NAT via the auto-detected WAN interface) |
+
 | `scripts/refresh_tak_cert.sh` | Stage the public TAK intermediate CA truststore so the web app can build client data packages |
 
 ### `setup_ap.sh` Usage
