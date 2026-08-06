@@ -41,12 +41,12 @@ REPO_DIR="$(dirname "$SCRIPT_DIR")"
 # interfaces detected" before we ever got around to installing the firmware.
 # (Seen with a Realtek RTL8822BU dongle: rtw88_8822bu loaded, device bound, but
 # /lib/firmware/rtw88/rtw8822b_fw.bin absent -> no phy, no interface.)
-echo "===> [1/9] Installing packages (hostapd, iw, wireless firmware)"
+echo "===> [1/9] Installing packages (hostapd, iw, ufw, wireless firmware)"
 
 apt update -y
 
 FW_INSTALLED=0
-for pkg in hostapd iw firmware-realtek firmware-mediatek firmware-misc-nonfree firmware-atheros; do
+for pkg in hostapd iw ufw firmware-realtek firmware-mediatek firmware-misc-nonfree firmware-atheros; do
     if dpkg -l "$pkg" 2>/dev/null | grep -q '^ii'; then
         echo "  -> $pkg is already installed."
     else
@@ -359,6 +359,22 @@ if command -v ufw >/dev/null 2>&1; then
     echo "  -> Allowed DHCP (67/udp) in on $AP_IFACE"
 fi
 
+# Service ports for the Nucleus stack. Without these the ufw default
+# deny-incoming policy blocks every service the moment the firewall is enabled
+# at the end of step 8 -- including SSH (22/tcp), which would lock out a remote
+# operator. ufw adds the matching IPv6 rules automatically.
+if command -v ufw >/dev/null 2>&1; then
+    for p in 22/tcp 80/tcp 1935/tcp 8089/tcp 8443/tcp 8444/tcp 8446/tcp \
+             8554/tcp 8888/tcp 8889/tcp 9000/tcp 9001/tcp 64738/tcp \
+             8000/udp 8001/udp 8090/udp 8189/udp 8890/udp 64738/udp; do
+        ufw allow "$p" >/dev/null 2>&1 || true
+    done
+    echo "  -> Allowed service ports (ssh, web, TAK, mediamtx, mumble, meshchat)"
+
+    ufw allow in on tailscale0 >/dev/null 2>&1 || true
+    echo "  -> Allowed all traffic in on tailscale0"
+fi
+
 echo ""
 
 # ============================================================================
@@ -392,8 +408,32 @@ COMMIT\\
 " "$UFW_BEFORE"
         echo "  -> Added NAT masquerade rule (${AP_SUBNET} -> ${WAN_IFACE})"
     fi
+
+    # The masquerade rule alone is not enough. ufw's default routed policy is
+    # DROP, so forwarded client packets are discarded before they ever reach
+    # POSTROUTING -- the AP hands out leases and clients still have no
+    # internet. This rule is what actually permits AP -> WAN forwarding.
+    ufw route allow in on "$AP_IFACE" out on "$WAN_IFACE" >/dev/null 2>&1 || true
+    echo "  -> Allowed routed traffic ${AP_IFACE} -> ${WAN_IFACE}"
+
     ufw reload
     echo "  -> UFW reloaded."
+
+    # Enable ufw LAST, once every rule above is in place. Enabling earlier
+    # would apply the default deny-incoming policy while SSH was still
+    # unprotected and drop the operator's session. Refuse to enable at all if
+    # the SSH rule somehow did not get added.
+    if ufw status 2>/dev/null | grep -q "Status: active"; then
+        echo "  -> UFW is already active."
+    elif ufw show added 2>/dev/null | grep -q "allow 22/tcp"; then
+        ufw --force enable
+        echo "  -> UFW enabled."
+    else
+        echo "  -> ERROR: refusing to enable UFW; no rule for 22/tcp was found."
+        echo "     Enabling now would drop SSH access. Add it manually:"
+        echo "       sudo ufw allow 22/tcp && sudo ufw enable"
+        exit 1
+    fi
 else
     echo "  -> UFW not found, skipping NAT setup."
     echo "     You may need to manually configure iptables NAT."
@@ -455,6 +495,19 @@ if systemctl is-active --quiet hostapd; then
     echo "  -> OK: hostapd is active"
 else
     echo "  -> FAIL: hostapd is not active"
+    VERIFY_FAILED=1
+fi
+
+# 5. NAT must actually be in the live ruleset. Checking before.rules is not
+# enough -- the file can be correct while the rules were never loaded. Without
+# this check the script happily reported "All checks passed" on an AP that
+# handed out leases but had no route to the internet.
+if iptables -t nat -S POSTROUTING 2>/dev/null \
+   | grep -q -- "-s ${AP_SUBNET}.*-o ${WAN_IFACE}.*MASQUERADE"; then
+    echo "  -> OK: NAT masquerade active (${AP_SUBNET} -> ${WAN_IFACE})"
+else
+    echo "  -> FAIL: no NAT masquerade rule for ${AP_SUBNET} -> ${WAN_IFACE}."
+    echo "           Clients will associate and get an IP but have no internet."
     VERIFY_FAILED=1
 fi
 

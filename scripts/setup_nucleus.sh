@@ -124,7 +124,7 @@ echo ""
 # ============================================================================
 # 1. Core Packages
 # ============================================================================
-echo "===> [1/8] Core packages (curl, pipx, iw, wifi firmware, avahi-daemon)"
+echo "===> [1/8] Core packages (curl, pipx, iw, ufw, wifi firmware, avahi-daemon)"
 
 
 apt update -y
@@ -145,6 +145,18 @@ if command -v iw &>/dev/null; then
 else
     echo "  -> Installing iw ..."
     apt install -y iw
+fi
+
+# ufw — required by setup_ap.sh, which configures the AP firewall rules and the
+# NAT masquerade for internet sharing. Install here for the same reason as iw:
+# guarantee it is present before the AP step runs. When it was missing,
+# setup_ap.sh silently skipped both firewall steps and clients ended up with a
+# working AP, a DHCP lease, and no route to the internet.
+if command -v ufw &>/dev/null; then
+    echo "  -> ufw is already installed."
+else
+    echo "  -> Installing ufw ..."
+    apt install -y ufw
 fi
 
 # Wireless firmware blobs. USB WiFi dongles get swapped often, and without the
