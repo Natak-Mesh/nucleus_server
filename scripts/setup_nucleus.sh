@@ -67,7 +67,12 @@ REPO_DIR="$(dirname "$SCRIPT_DIR")"
 # shellcheck source=lib/secrets.sh
 source "${SCRIPT_DIR}/lib/secrets.sh"
 MUMBLE_SUPERUSER_PW="$(secret_get_or_create MUMBLE_SUPERUSER_PW gen_password 20)"
-ADMIN_PIN="$(secret_get_or_create ADMIN_PIN gen_pin 6)"
+# Fixed appliance-wide dashboard admin PIN. Note: this is the same value as the
+# default WIFI_PSK, so anyone who can join the AP can also unlock the admin
+# zone (which can start/stop TAK, Mumble, MediaMTX and Reticulum). Replace this
+# with 'gen_pin 6' to go back to a random per-unit PIN.
+ADMIN_PIN="$(secret_get_or_create ADMIN_PIN echo 52235223)"
+
 
 # ============================================================================
 # 0. Preflight checks (advisory — warns, does not hard-fail)

@@ -364,9 +364,9 @@ fi
 # at the end of step 8 -- including SSH (22/tcp), which would lock out a remote
 # operator. ufw adds the matching IPv6 rules automatically.
 if command -v ufw >/dev/null 2>&1; then
-    for p in 22/tcp 80/tcp 1935/tcp 8089/tcp 8443/tcp 8444/tcp 8446/tcp \
+    for p in 22/tcp 80/tcp 1935/tcp 8000/tcp 8089/tcp 8443/tcp 8444/tcp 8446/tcp \
              8554/tcp 8888/tcp 8889/tcp 9000/tcp 9001/tcp 64738/tcp \
-             8000/udp 8001/udp 8090/udp 8189/udp 8890/udp 64738/udp; do
+             8001/udp 8090/udp 8189/udp 8890/udp 64738/udp; do
         ufw allow "$p" >/dev/null 2>&1 || true
     done
     echo "  -> Allowed service ports (ssh, web, TAK, mediamtx, mumble, meshchat)"
