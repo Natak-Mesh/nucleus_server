@@ -210,12 +210,6 @@
             staged on this unit. An operator can run
             <span class="mono">scripts/refresh_tak_cert.sh</span> once TAK is configured.</p>
         {% endif %}
-        {% if webadmin_ready %}
-            <p style="margin-top:0.75rem;">Download the <strong>WebAdmin certificate</strong> to log into the
-            TAK Server web administration interface.</p>
-            <button id="webadmin-dl" class="btn" type="button">Download WebAdmin certificate &darr;</button>
-            <span id="webadmin-dl-msg" class="muted" style="margin-left:0.5rem;"></span>
-        {% endif %}
     </div>
 
     <!-- ===================== QR codes ===================== -->
@@ -294,6 +288,20 @@
             <div class="ctl-row">
                 <span class="name">Mumble SuperUser</span>
                 <span class="secret">{{ mumble_pw if mumble_pw else '(unset)' }}</span>
+            </div>
+
+            <!-- WebAdmin certificate (admin-only: full TAK admin identity) -->
+            <div style="margin:1rem 0;">
+                {% if webadmin_ready %}
+                    <p style="margin:0 0 0.5rem;">Download the <strong>WebAdmin certificate</strong> to log into the
+                    TAK Server web administration interface. This is an
+                    <strong>admin identity</strong>, not a trust cert &mdash; keep it secure.</p>
+                    <button id="webadmin-dl" class="btn" type="button">Download WebAdmin certificate &darr;</button>
+                    <span id="webadmin-dl-msg" class="muted" style="margin-left:0.5rem;"></span>
+                {% else %}
+                    <p class="muted" style="margin:0;">WebAdmin certificate not staged yet &mdash; run
+                    <span class="mono">sudo bash scripts/refresh_tak_cert.sh</span> once TAK is configured.</p>
+                {% endif %}
             </div>
 
             <!-- Tailscale -->

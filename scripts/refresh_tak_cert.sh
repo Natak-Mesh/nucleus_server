@@ -1,15 +1,20 @@
 #!/usr/bin/env bash
 # ============================================================================
-# Nucleus Server - Stage the TAK intermediate CA truststore for the web app
+# Nucleus Server - Stage TAK certificates for the web app
 #
 # The web app (running as a non-root user) builds client data packages on the
 # fly, which must embed the TAK *intermediate CA truststore* (public). That
 # truststore lives in /opt/tak/certs/files/ owned by the `tak` user with mode
 # 0600, so the web app cannot read it directly.
 #
-# This script copies ONLY the public intermediate truststore to the target
-# user's ~/certs/caCert.p12 (mode 0644, owned by the target user) so the web
-# app can read it. It NEVER copies any private key or signing keystore.
+# This script stages two files into the target user's ~/certs/:
+#
+#   caCert.p12    (0644) - the PUBLIC intermediate truststore. Served openly
+#                          by the web app so clients can trust this server.
+#   webadmin.p12  (0600) - the PRIVATE web-admin client identity. Served ONLY
+#                          from behind the operator PIN, hence 0600.
+#
+# It NEVER copies the CA signing keystore or any raw private key.
 #
 # Re-run this any time the TAK CA is (re)generated.
 #
@@ -45,6 +50,8 @@ TARGET_GROUP=$(id -gn "$TARGET_USER")
 TAK_CERTS_DIR="/opt/tak/certs/files"
 DEST_DIR="${TARGET_HOME}/certs"
 DEST_FILE="${DEST_DIR}/caCert.p12"
+WEBADMIN_SRC="${TAK_CERTS_DIR}/webadmin.p12"
+WEBADMIN_DEST="${DEST_DIR}/webadmin.p12"
 
 echo "===> Staging TAK intermediate CA truststore"
 echo "  -> Target user : $TARGET_USER"
@@ -115,3 +122,16 @@ if command -v openssl &>/dev/null; then
 fi
 
 echo "===> TAK CA truststore staged successfully."
+
+# ---- Stage the webadmin client identity (admin-only download) ----
+# Unlike the truststore above, webadmin.p12 IS a private client identity: it
+# grants full TAK admin. It is staged 0600 (not 0644 like the CA) and the web
+# app only serves it from behind the operator PIN. Always named webadmin.p12.
+echo "===> Staging webadmin certificate"
+if [ -f "$WEBADMIN_SRC" ]; then
+    install -o "$TARGET_USER" -g "$TARGET_GROUP" -m 0600 "$WEBADMIN_SRC" "$WEBADMIN_DEST"
+    echo "  -> Staged to $WEBADMIN_DEST (owner ${TARGET_USER}, mode 0600)"
+else
+    echo "  -> NOTE: $WEBADMIN_SRC not found; skipping."
+    echo "     The WebAdmin download stays hidden until this cert exists."
+fi

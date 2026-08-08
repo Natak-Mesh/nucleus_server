@@ -258,7 +258,7 @@ def index():
         mem_used=used_mb,
         mem_total=total_mb,
         datapackage_ready=datapackage.ca_available(),
-        webadmin_ready=os.path.isfile(WEBADMIN_CERT_PATH),
+        webadmin_ready=is_admin() and os.path.isfile(WEBADMIN_CERT_PATH),
         qr_wifi=qr_svg(wifi_join_string(hostname)),
         qr_share=qr_svg(share_url),
         share_url=share_url,
@@ -315,7 +315,16 @@ def download_datapackage():
 
 @app.route("/download/webadmin")
 def download_webadmin():
-    """Stream the staged webadmin certificate (webadmin.p12) directly."""
+    """Stream the staged webadmin certificate (webadmin.p12) directly.
+
+    ADMIN-ONLY: unlike caCert.p12 (a public trust anchor), webadmin.p12 is a
+    private client identity granting full TAK admin. Gated behind the operator
+    PIN, and the 403 is checked BEFORE the file-exists test so an unauthorised
+    caller cannot probe whether the cert is staged.
+    """
+    if not is_admin():
+        abort(403)
+
     if not os.path.isfile(WEBADMIN_CERT_PATH):
         abort(503, "WebAdmin certificate not staged yet.")
 
