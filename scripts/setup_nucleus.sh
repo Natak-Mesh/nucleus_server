@@ -8,11 +8,17 @@
 #   1. Core packages  (curl, pipx, avahi-daemon)
 #   2. WiFi AP        (hostapd access point)
 #   3. Tailscale      (secure mesh VPN)
-#   4. MediaMTX       (RTSP/RTMP/HLS/WebRTC media server)
-#   5. Mumble Server  (low-latency VOIP for ATAK)
-#   6. Reticulum      (resilient mesh networking daemon)
-#   7. MeshChatX      (headless web UI for Reticulum)
-#   8. Web App        (Nucleus info dashboard on port 80)
+#   4. Reticulum      (resilient mesh networking daemon)
+#   5. MeshChatX      (headless web UI for Reticulum)
+#   6. Web App        (Nucleus info dashboard on port 80)
+#   7. Firewall       (UFW rules for MediaMTX + Mumble)
+#
+# MediaMTX and Mumble are deliberately NOT installed here. The OpenTAKServer
+# installer ships its own pinned MediaMTX (overwriting mediamtx.service) and
+# installs mumble-server when you answer Y at its prompt. Installing them
+# ahead of time only created unit/config overwrites to reconcile afterwards.
+# Their UFW ports are still opened here (step 7) so both work as soon as the
+# OTS installer puts them on the box.
 #
 # All services are enabled to auto-start on boot.
 # The script is idempotent — safe to re-run.
@@ -66,10 +72,10 @@ REPO_DIR="$(dirname "$SCRIPT_DIR")"
 # ---- Per-unit secrets (generate-once, persisted, never overwritten) ----
 # shellcheck source=lib/secrets.sh
 source "${SCRIPT_DIR}/lib/secrets.sh"
-MUMBLE_SUPERUSER_PW="$(secret_get_or_create MUMBLE_SUPERUSER_PW gen_password 20)"
 # Fixed appliance-wide dashboard admin PIN. Note: this is the same value as the
 # default WIFI_PSK, so anyone who can join the AP can also unlock the admin
-# zone (which can start/stop TAK, Mumble, MediaMTX and Reticulum). Replace this
+# zone (which can start/stop TAK, Mumble, MediaMTX and Reticulum once the
+# OpenTAKServer install has put those services on the box). Replace this
 # with 'gen_pin 6' to go back to a random per-unit PIN.
 ADMIN_PIN="$(secret_get_or_create ADMIN_PIN echo 52235223)"
 
@@ -129,7 +135,7 @@ echo ""
 # ============================================================================
 # 1. Core Packages
 # ============================================================================
-echo "===> [1/8] Core packages (curl, pipx, iw, ufw, wifi firmware, avahi-daemon)"
+echo "===> [1/7] Core packages (curl, pipx, iw, ufw, wifi firmware, avahi-daemon)"
 
 
 apt update -y
@@ -204,7 +210,7 @@ echo ""
 # ============================================================================
 # 2. WiFi Access Point (hostapd + internet sharing)
 # ============================================================================
-echo "===> [2/8] WiFi Access Point (hostapd + internet sharing)"
+echo "===> [2/7] WiFi Access Point (hostapd + internet sharing)"
 echo "  -> Delegating to setup_ap.sh ..."
 
 bash "${SCRIPT_DIR}/setup_ap.sh"
@@ -215,7 +221,7 @@ echo ""
 # ============================================================================
 # 3. Tailscale
 # ============================================================================
-echo "===> [3/8] Tailscale (mesh VPN)"
+echo "===> [3/7] Tailscale (mesh VPN)"
 
 if command -v tailscale &>/dev/null; then
     echo "  -> Tailscale is already installed."
@@ -232,194 +238,9 @@ echo "     NOTE: Run 'sudo tailscale up' to authenticate if not already connecte
 echo ""
 
 # ============================================================================
-# 4. MediaMTX
+# 4. Reticulum (rns / rnsd)
 # ============================================================================
-echo "===> [4/8] MediaMTX (media server)"
-
-# Pinned MediaMTX version. The SHA256 is verified against every tarball
-# (downloaded or local) before install. To bump the version, update both
-# MEDIAMTX_VERSION and MEDIAMTX_SHA256 together.
-MEDIAMTX_VERSION="1.18.2"
-MEDIAMTX_ARCH="linux_amd64"
-MEDIAMTX_SHA256="73ed27c292e05ceb4990dcb34531f01872dfff5374b7515c45a202e0abf47706"
-MEDIAMTX_TARBALL="mediamtx_v${MEDIAMTX_VERSION}_${MEDIAMTX_ARCH}.tar.gz"
-MEDIAMTX_URL="https://github.com/bluenviron/mediamtx/releases/download/v${MEDIAMTX_VERSION}/${MEDIAMTX_TARBALL}"
-MEDIAMTX_BIN="/usr/local/bin/mediamtx"
-MEDIAMTX_CONF_DIR="/etc/mediamtx"
-MEDIAMTX_CONF="${MEDIAMTX_CONF_DIR}/mediamtx.yml"
-MEDIAMTX_SERVICE="/etc/systemd/system/mediamtx.service"
-# Local fallback tarball locations (used if the download fails — e.g. offline
-# field installs). Checked in order.
-MEDIAMTX_LOCAL_CANDIDATES=(
-    "${REPO_DIR}/vendor/${MEDIAMTX_TARBALL}"
-    "${TARGET_HOME}/${MEDIAMTX_TARBALL}"
-)
-
-# Verify a tarball's SHA256 against the pinned value. Returns 0 on match.
-verify_mediamtx_sha() {
-    local file="$1"
-    local actual
-    actual=$(sha256sum "$file" | awk '{print $1}')
-    if [ "$actual" = "$MEDIAMTX_SHA256" ]; then
-        return 0
-    fi
-    echo "     SHA256 mismatch for $file"
-    echo "       expected: $MEDIAMTX_SHA256"
-    echo "       actual  : $actual"
-    return 1
-}
-
-if [ -x "$MEDIAMTX_BIN" ]; then
-    echo "  -> MediaMTX binary already exists at $MEDIAMTX_BIN."
-else
-    TMPDIR=$(mktemp -d)
-    TARBALL_PATH="${TMPDIR}/${MEDIAMTX_TARBALL}"
-    GOT_TARBALL=0
-
-    # 1. Try the pinned download.
-    echo "  -> Downloading MediaMTX v${MEDIAMTX_VERSION} ..."
-    if curl -fsSL "$MEDIAMTX_URL" -o "$TARBALL_PATH" && verify_mediamtx_sha "$TARBALL_PATH"; then
-        echo "  -> Download verified (SHA256 OK)."
-        GOT_TARBALL=1
-    else
-        echo "  -> Download failed or did not verify; trying local fallback ..."
-    fi
-
-    # 2. Offline fallback: use a local copy if present and verified.
-    if [ "$GOT_TARBALL" -ne 1 ]; then
-        for cand in "${MEDIAMTX_LOCAL_CANDIDATES[@]}"; do
-            if [ -f "$cand" ]; then
-                echo "  -> Found local tarball: $cand"
-                if verify_mediamtx_sha "$cand"; then
-                    cp "$cand" "$TARBALL_PATH"
-                    echo "  -> Local tarball verified (SHA256 OK)."
-                    GOT_TARBALL=1
-                    break
-                fi
-            fi
-        done
-    fi
-
-    if [ "$GOT_TARBALL" -ne 1 ]; then
-        echo "ERROR: Could not obtain a verified MediaMTX v${MEDIAMTX_VERSION} tarball."
-        echo "       Tried download and local fallbacks:"
-        printf '         %s\n' "${MEDIAMTX_LOCAL_CANDIDATES[@]}"
-        rm -rf "$TMPDIR"
-        exit 1
-    fi
-
-    echo "  -> Extracting ..."
-    tar -xzf "$TARBALL_PATH" -C "$TMPDIR"
-    install -m 0755 "${TMPDIR}/mediamtx" "$MEDIAMTX_BIN"
-
-    # Install default config if not already present
-    mkdir -p "$MEDIAMTX_CONF_DIR"
-    if [ ! -f "$MEDIAMTX_CONF" ]; then
-        if [ -f "${TMPDIR}/mediamtx.yml" ]; then
-            cp "${TMPDIR}/mediamtx.yml" "$MEDIAMTX_CONF"
-        else
-            # Minimal fallback config
-            cat > "$MEDIAMTX_CONF" <<'YMEOF'
-# MediaMTX configuration — see https://github.com/bluenviron/mediamtx
-logLevel: info
-api: yes
-apiAddress: :9997
-rtsp: yes
-rtspAddress: :8554
-rtmp: yes
-rtmpAddress: :1935
-hls: yes
-hlsAddress: :8888
-webrtc: yes
-webrtcAddress: :8889
-paths:
-  all:
-    source: publisher
-YMEOF
-        fi
-        echo "  -> Default config written to $MEDIAMTX_CONF"
-    fi
-    rm -rf "$TMPDIR"
-    echo "  -> MediaMTX installed to $MEDIAMTX_BIN"
-fi
-
-# Install systemd service (use repo copy if available, otherwise write inline)
-if [ -f "${REPO_DIR}/system/mediamtx.service" ]; then
-    cp "${REPO_DIR}/system/mediamtx.service" "$MEDIAMTX_SERVICE"
-else
-    cat > "$MEDIAMTX_SERVICE" <<'EOF'
-[Unit]
-Description=MediaMTX media server
-After=network.target
-
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/mediamtx /etc/mediamtx/mediamtx.yml
-Restart=on-failure
-RestartSec=5
-User=root
-
-[Install]
-WantedBy=multi-user.target
-EOF
-fi
-
-systemctl daemon-reload
-systemctl enable mediamtx
-systemctl restart mediamtx
-echo "  -> mediamtx is running."
-
-# UFW rules for MediaMTX
-if command -v ufw &>/dev/null; then
-    echo "  -> Opening MediaMTX ports in UFW ..."
-    ufw allow 8554/tcp comment "MediaMTX RTSP"
-    ufw allow 8554/udp comment "MediaMTX RTSP UDP"
-    ufw allow 1935/tcp comment "MediaMTX RTMP"
-    ufw allow 8888/tcp comment "MediaMTX HLS"
-    ufw allow 8889/tcp comment "MediaMTX WebRTC HTTP"
-    ufw allow 8889/udp comment "MediaMTX WebRTC UDP"
-    ufw allow 9997/tcp comment "MediaMTX API"
-fi
-echo ""
-
-# ============================================================================
-# 5. Mumble Server
-# ============================================================================
-echo "===> [5/8] Mumble Server (VOIP)"
-
-MUMBLE_PORT=64738
-# MUMBLE_SUPERUSER_PW is sourced from the per-unit secrets store near the top
-# of this script (generate-once, persisted). No hardcoded password here.
-
-if dpkg -l mumble-server 2>/dev/null | grep -q '^ii'; then
-
-    echo "  -> mumble-server is already installed."
-else
-    echo "  -> Installing mumble-server ..."
-    apt install -y mumble-server
-    echo "  -> mumble-server installed."
-fi
-
-systemctl enable mumble-server
-systemctl restart mumble-server
-echo "  -> mumble-server is running."
-
-# Set the SuperUser (admin) password
-echo "  -> Setting Mumble SuperUser password ..."
-mumble-server -supw "$MUMBLE_SUPERUSER_PW" 2>/dev/null || true
-
-# UFW rules for Mumble
-if command -v ufw &>/dev/null; then
-    echo "  -> Opening Mumble ports in UFW ..."
-    ufw allow "${MUMBLE_PORT}/tcp" comment "Mumble control"
-    ufw allow "${MUMBLE_PORT}/udp" comment "Mumble voice"
-fi
-echo ""
-
-# ============================================================================
-# 6. Reticulum (rns / rnsd)
-# ============================================================================
-echo "===> [6/8] Reticulum (mesh networking)"
+echo "===> [4/7] Reticulum (mesh networking)"
 
 # Install rns via pipx for the target user
 if sudo -u "$TARGET_USER" bash -lc 'command -v rnsd' &>/dev/null; then
@@ -429,6 +250,17 @@ else
     sudo -u "$TARGET_USER" bash -lc 'pipx install rns && pipx ensurepath'
     echo "  -> rns installed."
     echo "     NOTE: Open a new shell or 'source ~/.bashrc' for rnsd on PATH."
+fi
+
+# Reticulum's on-network interface discovery (any interface with
+# discoverable = yes) requires the LXMF module. Without it rnsd logs a Critical
+# error and exits 255 at startup, then trips StartLimitBurst and parks in
+# "failed". Run unconditionally so pre-existing rns installs get fixed too.
+if sudo -u "$TARGET_USER" bash -lc 'pipx runpip rns show lxmf' &>/dev/null; then
+    echo "  -> lxmf already present in the rns venv."
+else
+    echo "  -> Injecting lxmf into the rns venv (needed for interface discovery) ..."
+    sudo -u "$TARGET_USER" bash -lc 'pipx inject rns lxmf'
 fi
 
 # Determine rnsd binary path (pipx installs to ~/.local/bin)
@@ -466,9 +298,9 @@ echo "  -> rnsd is running."
 echo ""
 
 # ============================================================================
-# 7. MeshChatX (headless web UI for Reticulum)
+# 5. MeshChatX (headless web UI for Reticulum)
 # ============================================================================
-echo "===> [7/8] MeshChatX (Reticulum web UI)"
+echo "===> [5/7] MeshChatX (Reticulum web UI)"
 echo "  -> Delegating to install_meshchatx.sh ..."
 
 # Installs MeshChatX from its latest release wheel to /opt/meshchatx and runs
@@ -479,9 +311,9 @@ bash "${SCRIPT_DIR}/install_meshchatx.sh" "$TARGET_USER" || \
 echo ""
 
 # ============================================================================
-# 8. Nucleus info web app (port 80)
+# 6. Nucleus info web app (port 80)
 # ============================================================================
-echo "===> [8/8] Nucleus info web app (dashboard on port 80)"
+echo "===> [6/7] Nucleus info web app (dashboard on port 80)"
 echo "  -> Delegating to install_webapp.sh ..."
 
 # This is the primary way to find the box in the field (http://<hostname>.local),
@@ -496,16 +328,40 @@ echo "  -> Web app setup complete."
 echo ""
 
 # ============================================================================
-# 9. Stage TAK CA truststore for the web app (client data packages)
+# 7. Firewall rules for MediaMTX and Mumble
 # ============================================================================
-echo "===> [9] Staging TAK CA truststore for client data packages"
-echo "  -> Delegating to refresh_tak_cert.sh ..."
+echo "===> [7/7] Firewall rules (MediaMTX + Mumble)"
 
-# Non-fatal: TAK may not be configured yet on first run. The webapp simply
-# won't offer the data-package download until this succeeds (re-run any time).
-bash "${SCRIPT_DIR}/refresh_tak_cert.sh" "$TARGET_USER" || \
-    echo "  -> TAK cert not staged yet (TAK may not be configured). Re-run later: sudo bash ${SCRIPT_DIR}/refresh_tak_cert.sh"
+# Neither service is installed by this script — the OpenTAKServer installer
+# provides both. The ports are opened here anyway so the services are
+# reachable the moment OTS brings them up, without needing a second pass over
+# the firewall. 'ufw allow' is idempotent, so re-runs are harmless.
+MUMBLE_PORT=64738
+
+if command -v ufw &>/dev/null; then
+    echo "  -> Opening MediaMTX ports ..."
+    ufw allow 8554/tcp comment "MediaMTX RTSP"
+    ufw allow 8554/udp comment "MediaMTX RTSP UDP"
+    ufw allow 1935/tcp comment "MediaMTX RTMP"
+    ufw allow 8888/tcp comment "MediaMTX HLS"
+    ufw allow 8889/tcp comment "MediaMTX WebRTC HTTP"
+    ufw allow 8889/udp comment "MediaMTX WebRTC UDP"
+    ufw allow 9997/tcp comment "MediaMTX API"
+
+    echo "  -> Opening Mumble ports ..."
+    ufw allow "${MUMBLE_PORT}/tcp" comment "Mumble control"
+    ufw allow "${MUMBLE_PORT}/udp" comment "Mumble voice"
+else
+    echo "  -> WARNING: ufw not found; skipping firewall rules."
+fi
 echo ""
+
+# NOTE: There is no longer a step to stage the TAK CA truststore. OpenTAKServer
+# keeps its CA in ~/ots/ca/ owned by the same user the web app runs as, so the
+# app reads truststore-root.p12 directly and refresh_tak_cert.sh was deleted.
+# (That script existed only because official TAK Server kept its certs under a
+# separate `tak` user at mode 0600, out of the web app's reach.)
+
 
 # ============================================================================
 # Summary
@@ -526,17 +382,18 @@ echo "  ────────────────────────
 echo "  avahi-daemon   .local hostname resolution"
 echo "  hostapd        WiFi AP (5GHz channel 149)"
 echo "  tailscaled     Tailscale mesh VPN"
-echo "  mediamtx       RTSP :8554 | RTMP :1935 | HLS :8888 | WebRTC :8889"
-echo "  mumble-server  VOIP :${MUMBLE_PORT} (tcp+udp)"
 echo "  rnsd           Reticulum mesh daemon"
 echo "  meshchatx      Reticulum web UI  http://${HOSTNAME}.local:8000"
 echo "  nucleus-webapp Info dashboard    http://${HOSTNAME}.local"
 echo ""
+echo "  MediaMTX and Mumble are not installed by this script — the"
+echo "  OpenTAKServer installer provides both. Their firewall ports"
+echo "  (8554, 1935, 8888, 8889, 9997, ${MUMBLE_PORT}) are already open."
+echo ""
 echo "  Per-unit secrets (stored in ${NUCLEUS_SECRETS_FILE}, root-only):"
 echo "  ─────────────────────────────────────────"
-echo "  Mumble SuperUser password : ${MUMBLE_SUPERUSER_PW}"
 echo "  Dashboard admin PIN       : ${ADMIN_PIN}"
-echo "  (Persisted — these stay the same across re-runs/reboots.)"
+echo "  (Persisted — this stays the same across re-runs/reboots.)"
 echo ""
 echo "  Next steps:"
 echo "    sudo tailscale up          # authenticate Tailscale"

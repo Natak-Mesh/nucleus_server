@@ -5,20 +5,24 @@ Nucleus Server - Info & Control Web App
 A small Flask app served on port 80 with two zones:
 
   * PUBLIC zone (no auth): network identity, live interface IPs, service
-    up/down status, a minimal CPU/RAM readout, QR codes (WiFi join, TAK web
-    UI, data-package download), and the one-tap TAK client data-package
-    download.
+    up/down status, a minimal CPU/RAM readout, QR codes (WiFi join, share
+    this page), and a one-tap download of the TAK CA certificate.
 
   * ADMIN zone (PIN-gated): start/stop/restart of the core services and a
     view of the per-unit secrets (Mumble SuperUser password). The PIN is the
     per-unit ADMIN_PIN provisioned into /etc/nucleus/secrets and handed to
     this process by systemd via EnvironmentFile.
 
+This is the appliance's landing page, not a TAK admin console. TAK itself is
+administered in OpenTAKServer's own web UI on port 8444; anything TAK-specific
+beyond "is it up" and "how do I trust it" belongs there, not here.
+
 Connect to the WiFi AP (the SSID is the server's hostname) and browse to
 http://<hostname>.local — or to the WiFi gateway address — to view this page.
 
 Served by waitress (production WSGI server) on 0.0.0.0:80.
 """
+
 
 import json
 import os
@@ -38,11 +42,23 @@ from flask import (
     url_for,
 )
 
-import datapackage
 import tailscale
 
-# Path to the webadmin certificate (TAK web UI admin login).
-WEBADMIN_CERT_PATH = os.path.expanduser("~/certs/webadmin.p12")
+# OpenTAKServer's public CA truststore. Clients install this to trust the
+# server; it is a public trust anchor, not a credential, so it is served
+# without auth (OTS's own /api/truststore endpoint does the same).
+#
+# No staging step is needed: this web app runs as the same user that owns
+# ~/ots, so it can read the file directly. (Official TAK Server kept its
+# certs under a separate `tak` user at mode 0600, which is why the old
+# scripts/refresh_tak_cert.sh had to copy them out. That script is gone.)
+OTS_CA_PATH = os.path.expanduser("~/ots/ca/truststore-root.p12")
+
+# Port the OpenTAKServer web UI is reachable on. NOT 8443 — that vhost is the
+# Marti API and sets `ssl_verify_client on`, so a browser without an enrolled
+# client certificate is rejected. See docs/opentakserver_install/.
+OTS_UI_PORT = 8444
+
 
 
 app = Flask(__name__)
@@ -53,10 +69,22 @@ app.secret_key = _secrets.token_hex(32)
 LISTEN_HOST = "0.0.0.0"
 LISTEN_PORT = 80
 
+# OpenTAKServer is four cooperating units, not one. `opentakserver` is the
+# parent: it declares Requires= on the other three, so starting/stopping it
+# cascades. The page shows one rolled-up "TAK Server" state plus a per-unit
+# breakdown, because a partial failure (typically cot_parser losing its
+# RabbitMQ exchange race at boot) is otherwise invisible.
+OTS_SERVICES = {
+    "opentakserver": "Core",
+    "cot_parser": "CoT parser",
+    "eud_handler": "EUD (TCP)",
+    "eud_handler_ssl": "EUD (SSL)",
+}
+
 # Services the admin zone is allowed to control. The service name is validated
 # against this hardcoded allow-list before ever touching systemctl.
 MANAGED_SERVICES = {
-    "takserver": "TAK Server",
+    "opentakserver": "TAK Server",
     "mediamtx": "MediaMTX",
     "mumble-server": "Mumble",
     "rnsd": "Reticulum",
@@ -64,12 +92,16 @@ MANAGED_SERVICES = {
     "nucleus-webapp": "Web App",
 }
 
+
 # Port the MeshChatX headless web UI listens on (see install_meshchatx.sh).
 MESHCHATX_PORT = 8000
 
 # Admin PIN, supplied by systemd via EnvironmentFile=/etc/nucleus/secrets.
 ADMIN_PIN = os.environ.get("ADMIN_PIN", "")
-# Mumble password, same source (shown in the admin zone).
+# Mumble SuperUser password, same source. setup_nucleus.sh no longer installs
+# Mumble (the OpenTAKServer installer does), so this is normally unset and the
+# admin zone hides the row. Kept so units provisioned before that change, which
+# still have MUMBLE_SUPERUSER_PW in /etc/nucleus/secrets, keep displaying it.
 MUMBLE_PW = os.environ.get("MUMBLE_SUPERUSER_PW", "")
 
 # WiFi AP passphrase for the join QR. Overridable via env; defaults to the
@@ -143,7 +175,32 @@ def get_service_status(name):
         return "Stopped"
 
 
+def get_ots_status():
+    """
+    Roll the four OpenTAKServer units up into a single state plus detail.
+
+    Returns {"status": "Running"|"Degraded"|"Stopped", "units": {...}}.
+
+    "Degraded" is the case worth surfacing: the core is up and serving the web
+    UI, but a helper died — e.g. cot_parser, which loses a startup race against
+    RabbitMQ and then stays dead. A plain Running/Stopped flag reports that as
+    healthy, which is how it goes unnoticed until CoT silently stops flowing.
+    """
+    units = {name: get_service_status(name) for name in OTS_SERVICES}
+    running = sum(1 for s in units.values() if s == "Running")
+
+    if running == len(units):
+        status = "Running"
+    elif running == 0:
+        status = "Stopped"
+    else:
+        status = "Degraded"
+
+    return {"status": status, "units": units}
+
+
 # Previous /proc/stat snapshot, so CPU% is measured as the average over the
+
 # real time between calls (i.e. between page loads / poll requests) instead of
 # a short self-measuring sleep that spikes on the web app's own activity.
 _cpu_prev = None
@@ -243,12 +300,17 @@ def index():
     # via the AP gateway IP or a dynamic LAN DHCP address, so a colleague on the
     # same network can scan and land on the same dashboard — no guessing.
     share_url = f"http://{request.host}/"
+    ots = get_ots_status()
     return render_template(
         "index.html",
         hostname=hostname,
         mdns_name=mdns,
-        tak_status=get_service_status("takserver"),
+        tak_status=ots["status"],
+        tak_units=ots["units"],
+        ots_service_labels=OTS_SERVICES,
+        ots_ui_port=OTS_UI_PORT,
         mediamtx_status=get_service_status("mediamtx"),
+
         mumble_status=get_service_status("mumble-server"),
         rnsd_status=get_service_status("rnsd"),
         meshchatx_status=get_service_status("meshchatx"),
@@ -257,9 +319,9 @@ def index():
         cpu_pct=get_cpu_percent(),
         mem_used=used_mb,
         mem_total=total_mb,
-        datapackage_ready=datapackage.ca_available(),
-        webadmin_ready=is_admin() and os.path.isfile(WEBADMIN_CERT_PATH),
+        cacert_ready=os.path.isfile(OTS_CA_PATH),
         qr_wifi=qr_svg(wifi_join_string(hostname)),
+
         qr_share=qr_svg(share_url),
         share_url=share_url,
 
@@ -277,33 +339,46 @@ def stats():
     interfaces). Mirrors the values rendered into the page at load time so the
     readouts can be refreshed in place without a full reload."""
     used_mb, total_mb = get_mem()
+    ots = get_ots_status()
     return jsonify(
         {
             "cpu_pct": get_cpu_percent(),
             "mem_used": used_mb,
             "mem_total": total_mb,
             "services": {
-                "takserver": get_service_status("takserver"),
+                # Rolled-up TAK state; per-unit detail is under "tak_units".
+                "opentakserver": ots["status"],
                 "mediamtx": get_service_status("mediamtx"),
                 "mumble-server": get_service_status("mumble-server"),
                 "rnsd": get_service_status("rnsd"),
                 "meshchatx": get_service_status("meshchatx"),
                 "tailscale": "Running" if tailscale.status().get("logged_in") else "Stopped",
             },
+            "tak_units": ots["units"],
             "interfaces": get_interfaces(),
         }
     )
 
 
-@app.route("/download/datapackage")
 
-def download_datapackage():
+@app.route("/download/cacert")
+def download_cacert():
+    """
+    Stream OpenTAKServer's CA truststore so a client can trust this server.
 
-    """Stream the staged intermediate CA truststore (caCert.p12) directly."""
-    if not datapackage.ca_available():
-        abort(503, "TAK CA not staged yet. Run scripts/refresh_tak_cert.sh.")
+    No auth, deliberately: this is a public trust anchor, not a credential. It
+    lets a device verify the server's identity — it grants no access on its
+    own, which still requires an OTS username and password. OTS serves the
+    same file unauthenticated from its own /api/truststore.
 
-    with open(datapackage.DEFAULT_CA_PATH, "rb") as fh:
+    Note there is no webadmin.p12 equivalent here. Official TAK Server used a
+    client certificate as the admin identity; OTS uses username/password, so
+    there is no admin cert to hand out.
+    """
+    if not os.path.isfile(OTS_CA_PATH):
+        abort(503, "OpenTAKServer CA not found. Has `flask ots create-ca` been run?")
+
+    with open(OTS_CA_PATH, "rb") as fh:
         blob = fh.read()
 
     return Response(
@@ -312,30 +387,6 @@ def download_datapackage():
         headers={"Content-Disposition": 'attachment; filename="caCert.p12"'},
     )
 
-
-@app.route("/download/webadmin")
-def download_webadmin():
-    """Stream the staged webadmin certificate (webadmin.p12) directly.
-
-    ADMIN-ONLY: unlike caCert.p12 (a public trust anchor), webadmin.p12 is a
-    private client identity granting full TAK admin. Gated behind the operator
-    PIN, and the 403 is checked BEFORE the file-exists test so an unauthorised
-    caller cannot probe whether the cert is staged.
-    """
-    if not is_admin():
-        abort(403)
-
-    if not os.path.isfile(WEBADMIN_CERT_PATH):
-        abort(503, "WebAdmin certificate not staged yet.")
-
-    with open(WEBADMIN_CERT_PATH, "rb") as fh:
-        blob = fh.read()
-
-    return Response(
-        blob,
-        mimetype="application/x-pkcs12",
-        headers={"Content-Disposition": 'attachment; filename="webadmin.p12"'},
-    )
 
 
 # --------------------------------------------------------------------------

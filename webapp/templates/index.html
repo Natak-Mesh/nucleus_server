@@ -43,7 +43,16 @@
         .svc .name { font-weight: 600; color: #fff; min-width: 6.5rem; }
         .svc .running { color: #81c784; font-weight: 600; }
         .svc .stopped { color: #e57373; font-weight: 600; }
+        .svc .degraded { color: #ffb74d; font-weight: 600; }
         .svc .port { font-family: "SF Mono", Menlo, Consolas, monospace; color: #5a6678; }
+
+        /* per-unit breakdown under the rolled-up TAK row */
+        .svc-detail { display: flex; flex-wrap: wrap; gap: 0.9rem; margin: -0.2rem 0 0.8rem 0.2rem; font-size: 0.75rem; color: #5a6678; }
+        .svc-detail .unit { display: flex; align-items: center; gap: 0.3rem; }
+        .unit-dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
+        .unit-dot.running { background: #81c784; }
+        .unit-dot.stopped { background: #e57373; }
+
         .btn {
             display: inline-block; padding: 0.2rem 0.7rem; font-size: 0.75rem; font-weight: 600;
             color: #0f1419; background: #f85b18; border: none; border-radius: 4px;
@@ -161,11 +170,20 @@
     <h2>Services</h2>
     <div class="svc">
         <span class="name">TAK Server</span>
-        <span class="svc-state {% if tak_status == 'Running' %}running{% else %}stopped{% endif %}" data-svc="takserver">{{ tak_status }}</span>
-        <span class="port">:8443</span>
-
+        <span class="svc-state {% if tak_status == 'Running' %}running{% elif tak_status == 'Degraded' %}degraded{% else %}stopped{% endif %}" data-svc="opentakserver">{{ tak_status }}</span>
+        <span class="port">:{{ ots_ui_port }}</span>
         <a id="tak-open" class="btn" target="_blank" rel="noopener">Open &rarr;</a>
     </div>
+    <!-- OpenTAKServer is four units; the row above is their rolled-up state.
+         This breakdown shows which one is down when that state is Degraded. -->
+    <div class="svc-detail" id="tak-units">
+        {% for unit, label in ots_service_labels.items() %}
+        <span class="unit">
+            <span class="unit-dot {% if tak_units[unit] == 'Running' %}running{% else %}stopped{% endif %}" data-unit="{{ unit }}"></span>{{ label }}
+        </span>
+        {% endfor %}
+    </div>
+
     <div class="svc">
         <span class="name">MediaMTX</span>
         <span class="svc-state {% if mediamtx_status == 'Running' %}running{% else %}stopped{% endif %}" data-svc="mediamtx">{{ mediamtx_status }}</span>
@@ -197,20 +215,22 @@
     <!-- ===================== TAK onboarding ===================== -->
     <h2>Join TAK</h2>
     <div class="pkg">
-        {% if datapackage_ready %}
-            <p>Download this server's <strong>intermediate CA certificate</strong> and install it
-            on your device. This is the trust cert only &mdash; you'll still need to
-            <strong>set up the TAK server connection manually</strong> and log in.</p>
+        {% if cacert_ready %}
+            <p>Download this server's <strong>CA certificate</strong> and install it on your
+            device so it trusts this server. This is the trust cert only &mdash; you'll still
+            need to <strong>set up the TAK server connection manually</strong> and log in with
+            a username and password.</p>
+            <p class="muted">Server <span class="mono">{{ mdns_name }}:8089</span> (SSL) &middot;
+            truststore password <span class="mono">atakatak</span> &middot;
+            accounts are managed in the TAK Server UI on port {{ ots_ui_port }}.</p>
             <button id="pkg-dl" class="btn" type="button">Download CA certificate &darr;</button>
-
             <span id="pkg-dl-msg" class="muted" style="margin-left:0.5rem;"></span>
-
         {% else %}
-            <p class="muted">CA certificate not available yet &mdash; the TAK CA has not been
-            staged on this unit. An operator can run
-            <span class="mono">scripts/refresh_tak_cert.sh</span> once TAK is configured.</p>
+            <p class="muted">CA certificate not available yet &mdash; the TAK server's
+            certificate authority has not been created on this unit.</p>
         {% endif %}
     </div>
+
 
     <!-- ===================== QR codes ===================== -->
     <h2>Quick Connect</h2>
@@ -285,24 +305,26 @@
                 </div>
                 {% endfor %}
             </div>
+            <!-- Only shown on units where setup generated a Mumble SuperUser
+                 password. Current builds leave Mumble to the OpenTAKServer
+                 installer, which sets its own, so this row is normally absent. -->
+            {% if mumble_pw %}
             <div class="ctl-row">
                 <span class="name">Mumble SuperUser</span>
-                <span class="secret">{{ mumble_pw if mumble_pw else '(unset)' }}</span>
+                <span class="secret">{{ mumble_pw }}</span>
+            </div>
+            {% endif %}
+
+            <!-- No TAK admin certificate to download: OpenTAKServer authenticates
+                 with a username and password, not a client cert. Admin lives in
+                 the OTS web UI, not here. -->
+            <div class="ctl-row">
+                <span class="name">TAK Server admin</span>
+                <span style="font-size:0.85rem;color:#a9b7cc;">Sign in at
+                    <a href="#" id="tak-admin-link" target="_blank" rel="noopener">port {{ ots_ui_port }}</a>
+                    with your OpenTAKServer username and password.</span>
             </div>
 
-            <!-- WebAdmin certificate (admin-only: full TAK admin identity) -->
-            <div style="margin:1rem 0;">
-                {% if webadmin_ready %}
-                    <p style="margin:0 0 0.5rem;">Download the <strong>WebAdmin certificate</strong> to log into the
-                    TAK Server web administration interface. This is an
-                    <strong>admin identity</strong>, not a trust cert &mdash; keep it secure.</p>
-                    <button id="webadmin-dl" class="btn" type="button">Download WebAdmin certificate &darr;</button>
-                    <span id="webadmin-dl-msg" class="muted" style="margin-left:0.5rem;"></span>
-                {% else %}
-                    <p class="muted" style="margin:0;">WebAdmin certificate not staged yet &mdash; run
-                    <span class="mono">sudo bash scripts/refresh_tak_cert.sh</span> once TAK is configured.</p>
-                {% endif %}
-            </div>
 
             <!-- Tailscale -->
             {% if ts_status.available %}
@@ -387,11 +409,17 @@
     <div class="footer">Nucleus Server info &amp; control page.</div>
 
     <script>
-        // Point the TAK "Open" button at the same host the user is using.
+        // Point the TAK links at the same host the user is using. Port 8444 is
+        // the OTS web UI; 8443 is the Marti API and requires a client cert, so
+        // sending a browser there just produces a TLS rejection.
         (function () {
-            var btn = document.getElementById("tak-open");
-            if (btn) { btn.href = "https://" + window.location.hostname + ":8443"; }
+            var url = "https://" + window.location.hostname + ":{{ ots_ui_port }}";
+            ["tak-open", "tak-admin-link"].forEach(function (id) {
+                var el = document.getElementById(id);
+                if (el) { el.href = url; }
+            });
         })();
+
 
         // Point the MeshChatX "Open" button at the same host on its web UI port.
         (function () {
@@ -399,11 +427,11 @@
             if (btn) { btn.href = "http://" + window.location.hostname + ":{{ meshchatx_port }}"; }
         })();
 
-        // Download the data package via a same-origin fetch + blob. A normal
+        // Download the CA certificate via a same-origin fetch + blob. A normal
         // link/navigation can get silently "upgraded" by the browser to
-        // https://<host>:8443 (TAK's mutual-TLS port), which then fails with a
-        // certificate / "access denied" error. Fetching the bytes on the
-        // already-http page and saving a blob avoids any navigation/upgrade.
+        // https://<host>, which this app does not serve, so the download would
+        // fail. Fetching the bytes on the already-http page and saving a blob
+        // avoids any navigation/upgrade.
         (function () {
             var btn = document.getElementById("pkg-dl");
             if (!btn) { return; }
@@ -412,46 +440,11 @@
                 btn.disabled = true;
                 if (msg) { msg.textContent = "Preparing…"; }
                 // Relative URL → same origin (current http page), no upgrade.
-                fetch("download/datapackage", { credentials: "same-origin" })
+                fetch("download/cacert", { credentials: "same-origin" })
                     .then(function (resp) {
                         if (!resp.ok) { throw new Error("HTTP " + resp.status); }
-                        var name = "enrollment.zip";
-                        var cd = resp.headers.get("Content-Disposition") || "";
-                        var m = cd.match(/filename="?([^"]+)"?/);
-                        if (m) { name = m[1]; }
-                        return resp.blob().then(function (blob) { return [blob, name]; });
-                    })
-                    .then(function (pair) {
-                        var blob = pair[0], name = pair[1];
-                        var url = URL.createObjectURL(blob);
-                        var a = document.createElement("a");
-                        a.href = url;
-                        a.download = name;
-                        document.body.appendChild(a);
-                        a.click();
-                        document.body.removeChild(a);
-                        setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
-                        if (msg) { msg.textContent = "Saved " + name; }
-                    })
-                    .catch(function (err) {
-                        if (msg) { msg.textContent = "Failed: " + err.message; }
-                    })
-                    .finally(function () { btn.disabled = false; });
-            });
-        })();
+                        var name = "caCert.p12";
 
-        // Download the webadmin certificate via the same fetch + blob pattern.
-        (function () {
-            var btn = document.getElementById("webadmin-dl");
-            if (!btn) { return; }
-            var msg = document.getElementById("webadmin-dl-msg");
-            btn.addEventListener("click", function () {
-                btn.disabled = true;
-                if (msg) { msg.textContent = "Preparing…"; }
-                fetch("download/webadmin", { credentials: "same-origin" })
-                    .then(function (resp) {
-                        if (!resp.ok) { throw new Error("HTTP " + resp.status); }
-                        var name = "webadmin.p12";
                         var cd = resp.headers.get("Content-Disposition") || "";
                         var m = cd.match(/filename="?([^"]+)"?/);
                         if (m) { name = m[1]; }
@@ -477,6 +470,7 @@
         })();
 
         // Tailscale: when a login is kicked off, poll the status endpoint to
+
         // surface the auth URL (link + QR). Once connected, reload so the panel
         // reflects the new state (tailnet, IP, profile list).
         (function () {
@@ -542,11 +536,26 @@
         (function () {
             function setState(el, status) {
                 if (!el) { return; }
-                var running = status === "Running";
                 el.textContent = status;
-                el.classList.toggle("running", running);
-                el.classList.toggle("stopped", !running);
+                // Three-way: TAK rolls up to Degraded when only some of its
+                // units are alive. Everything else is only ever Running/Stopped.
+                el.classList.toggle("running", status === "Running");
+                el.classList.toggle("degraded", status === "Degraded");
+                el.classList.toggle("stopped", status === "Stopped");
             }
+
+            // Per-unit dots under the TAK row.
+            function setUnits(units) {
+                if (!units) { return; }
+                document.querySelectorAll(".unit-dot").forEach(function (dot) {
+                    var name = dot.getAttribute("data-unit");
+                    if (!(name in units)) { return; }
+                    var up = units[name] === "Running";
+                    dot.classList.toggle("running", up);
+                    dot.classList.toggle("stopped", !up);
+                });
+            }
+
 
             function renderInterfaces(tbody, interfaces) {
                 if (!tbody) { return; }
@@ -627,6 +636,8 @@
                                 if (key in data.services) { setState(el, data.services[key]); }
                             });
                         }
+                        setUnits(data.tak_units);
+
 
                         // Interfaces
                         renderInterfaces(ifaceBody, data.interfaces || []);

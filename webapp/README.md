@@ -1,8 +1,13 @@
 # Nucleus Server — Info Web App
 
-A minimal, read-only web page that shows the server's network identity
-(hostname + per-interface IP addresses), so you can find the box's IP without
-running a network scan.
+The appliance's landing page: the server's network identity (hostname +
+per-interface IP addresses) so you can find the box without a network scan,
+live CPU/RAM and service status, QR codes, a one-tap TAK CA certificate
+download, and a PIN-gated admin zone for service control and Tailscale.
+
+It is not a TAK admin console — TAK is administered in OpenTAKServer's own web
+UI on port 8444.
+
 
 ## What it is
 

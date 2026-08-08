@@ -107,6 +107,16 @@ else
     echo "    NOTE: $TARGET_USER must open a new shell (or 'source ~/.bashrc') for rnsd on PATH."
 fi
 
+# Reticulum's on-network interface discovery (any interface with
+# discoverable = yes) requires the LXMF module. Without it rnsd exits 255 at
+# startup. Checked separately so pre-existing rns installs get fixed too.
+if sudo -u "$TARGET_USER" bash -lc 'pipx runpip rns show lxmf' &>/dev/null; then
+    echo "==> lxmf already present in the rns venv."
+else
+    echo "==> Injecting lxmf into the rns venv (needed for interface discovery)..."
+    sudo -u "$TARGET_USER" bash -lc 'pipx inject rns lxmf'
+fi
+
 # --- Summary ---
 HOSTNAME=$(hostname)
 echo ""

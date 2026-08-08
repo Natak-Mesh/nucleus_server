@@ -65,9 +65,10 @@ fi
 # --- Deploy source to /opt ---
 echo "==> Deploying source to $DEPLOY_DIR ..."
 mkdir -p "$DEPLOY_DIR"
-cp -r "$SRC_DIR/app.py" "$SRC_DIR/datapackage.py" "$SRC_DIR/tailscale.py" \
+cp -r "$SRC_DIR/app.py" "$SRC_DIR/tailscale.py" \
       "$SRC_DIR/templates" "$SRC_DIR/static" "$SRC_DIR/requirements.txt" \
       "$DEPLOY_DIR/"
+
 
 
 
@@ -121,10 +122,15 @@ SUDOERS_FILE="/etc/sudoers.d/nucleus-webapp"
 echo "==> Installing sudoers rule: $SUDOERS_FILE ..."
 cat > "$SUDOERS_FILE" <<EOF
 # Allow the Nucleus web app to start/stop/restart ONLY the managed services.
+#
+# OpenTAKServer is four units. Only the parent (opentakserver) is listed: it
+# declares Requires= on cot_parser, eud_handler and eud_handler_ssl, so systemd
+# cascades start/stop to them. The web app reads all four for status display,
+# which needs no privilege, but can only act on the parent.
 ${RUN_USER} ALL=(root) NOPASSWD: \\
-    /usr/bin/systemctl start takserver, \\
-    /usr/bin/systemctl stop takserver, \\
-    /usr/bin/systemctl restart takserver, \\
+    /usr/bin/systemctl start opentakserver, \\
+    /usr/bin/systemctl stop opentakserver, \\
+    /usr/bin/systemctl restart opentakserver, \\
     /usr/bin/systemctl start mediamtx, \\
     /usr/bin/systemctl stop mediamtx, \\
     /usr/bin/systemctl restart mediamtx, \\

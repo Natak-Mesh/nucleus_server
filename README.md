@@ -15,12 +15,15 @@ For the official TAK server, the box requires 8 GB RAM.
 The web UI (`nucleus-webapp`, served on port 80) has two zones:
 
 - **Public zone** (no login): the server's hostname/mDNS name, live interface
-  IPs, a minimal CPU/RAM readout, running/stopped status of the key services,
-  QR codes (WiFi join, TAK web UI, data-package download), and a one-tap
-  **TAK client data-package download** for ATAK/WinTAK auto-enrollment.
-- **Admin zone** (per-unit PIN): start/stop/restart the core services and view
-  the per-unit Mumble SuperUser password. The PIN is generated at setup and
-  shown in the setup summary (stored in `/etc/nucleus/secrets`).
+  IPs, a minimal CPU/RAM readout, running/stopped status of the key services
+  (TAK is rolled up from its four units, with a per-unit breakdown), QR codes
+  (WiFi join, share this page), and a one-tap **TAK CA certificate download**
+  so clients can trust the server.
+- **Admin zone** (PIN): start/stop/restart the core services and manage
+  Tailscale (connect/disconnect, log into or switch between tailnets). The PIN
+  is set at setup time and shown in the setup summary (stored in
+  `/etc/nucleus/secrets`).
+
 
 It's the easiest way to find the box's current addresses without a network scan.
 
@@ -62,11 +65,22 @@ All services are enabled to auto-start on boot.
 | **avahi-daemon** | `.local` mDNS hostname resolution | 5353/udp | Enables `<hostname>.local` for every service |
 | **hostapd** | WiFi access point (5 GHz, channel 149) + internet sharing via the auto-detected WAN interface (NAT) | — | Connect to the WiFi network named after the hostname |
 | **tailscaled** | Tailscale mesh VPN | — | Run `sudo tailscale up` once to authenticate |
-| **mediamtx** | RTSP / RTMP / HLS / WebRTC media server | 8554, 1935, 8888, 8889, 9997 | RTSP `rtsp://<hostname>.local:8554/<path>`, RTMP `rtmp://<hostname>.local:1935/<path>`, HLS `http://<hostname>.local:8888`, WebRTC `http://<hostname>.local:8889`, API `:9997` |
-| **mumble-server** | Low-latency VOIP (ATAK Mumble plugin) | 64738 tcp+udp | Connect a Mumble client / the ATAK Mumble plugin to `<hostname>.local:64738`. Admin via the `SuperUser` account |
 | **rnsd** | Reticulum mesh networking daemon | — | Runs as a background daemon |
 | **meshchatx** | Reticulum MeshChatX — headless web UI (LXMF messaging, network map, page browsing) for the mesh | 8000/tcp | `http://<hostname>.local:8000` (or the WiFi gateway address). Also linked from the web UI's Services list |
-| **takserver** | TAK server (status shown in the web UI) | — | Install per the build guide in `docs/` (requires 8 GB RAM) |
+
+### Installed by the OpenTAKServer installer
+
+`setup_nucleus.sh` does **not** install these — the OpenTAKServer installer
+does (see `docs/opentakserver_install/`). Their firewall ports are opened by
+`setup_nucleus.sh` anyway, so they work the moment OTS puts them on the box,
+and the web UI shows their status either way.
+
+| Service | Purpose | Port(s) | How to access |
+|---------|---------|---------|---------------|
+| **opentakserver** | TAK server (four units: core, CoT parser, EUD TCP, EUD SSL) | 8444 (web UI), 8089 (SSL EUD) | Web UI `https://<hostname>.local:8444`. Not 8443 — that vhost is the Marti API and requires a client cert |
+| **mediamtx** | RTSP / RTMP / HLS / WebRTC media server | 8554, 1935, 8888, 8889, 9997 | RTSP `rtsp://<hostname>.local:8554/<path>`, RTMP `rtmp://<hostname>.local:1935/<path>`, HLS `http://<hostname>.local:8888`, WebRTC `http://<hostname>.local:8889`, API `:9997` |
+| **mumble-server** | Low-latency VOIP (ATAK Mumble plugin) | 64738 tcp+udp | Connect a Mumble client / the ATAK Mumble plugin to `<hostname>.local:64738`. Admin via the `SuperUser` account |
+
 
 ## Quick Start
 
@@ -109,12 +123,15 @@ The WiFi AP is configured automatically per-device:
 |--------|---------|
 | `scripts/setup_nucleus.sh` | **Full setup** — installs all services (including the web app) in one shot |
 | `scripts/setup.sh` | Base packages + Tailscale + Reticulum only |
-| `scripts/install_mumble.sh` | Mumble server only |
 | `scripts/install_webapp.sh` | Flask info web app (also disables apache2, which otherwise squats on port 80) |
 | `scripts/install_meshchatx.sh` | Reticulum MeshChatX headless web UI (port 8000) |
 | `scripts/setup_ap.sh` | WiFi access point (hostapd) + wireless firmware (Realtek/MediaTek/etc.) + internet sharing (NAT via the auto-detected WAN interface) |
+| `scripts/lib/secrets.sh` | Sourced helper — creates/reads the per-unit secrets in `/etc/nucleus/secrets` |
 
-| `scripts/refresh_tak_cert.sh` | Stage the public TAK intermediate CA truststore so the web app can build client data packages |
+> There is no Mumble or MediaMTX installer, and no TAK cert-staging script.
+> Mumble and MediaMTX come from the OpenTAKServer installer, and the web app
+> reads the OTS CA directly out of `~/ots/ca/`, so nothing needs to be copied.
+
 
 ### `setup_ap.sh` Usage
 
