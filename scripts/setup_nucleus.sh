@@ -66,11 +66,15 @@ REPO_DIR="$(dirname "$SCRIPT_DIR")"
 # ---- Per-unit secrets (generate-once, persisted, never overwritten) ----
 # shellcheck source=lib/secrets.sh
 source "${SCRIPT_DIR}/lib/secrets.sh"
-MUMBLE_SUPERUSER_PW="$(secret_get_or_create MUMBLE_SUPERUSER_PW gen_password 20)"
-# Fixed appliance-wide dashboard admin PIN. Note: this is the same value as the
-# default WIFI_PSK, so anyone who can join the AP can also unlock the admin
-# zone (which can start/stop TAK, Mumble, MediaMTX and Reticulum). Replace this
-# with 'gen_pin 6' to go back to a random per-unit PIN.
+# Fixed appliance-wide Mumble SuperUser password and dashboard admin PIN, both
+# 52235223. Note: this is the same value as the default WIFI_PSK, so anyone who
+# can join the AP can also unlock the admin zone (which can start/stop TAK,
+# Mumble, MediaMTX and Reticulum) and administer Mumble. Replace these with
+# 'gen_password 20' / 'gen_pin 6' to go back to random per-unit values.
+# secret_get_or_create is generate-once/never-overwrite, so an operator can
+# override either value by editing /etc/nucleus/secrets and re-running setup —
+# their custom value is preserved.
+MUMBLE_SUPERUSER_PW="$(secret_get_or_create MUMBLE_SUPERUSER_PW echo 52235223)"
 ADMIN_PIN="$(secret_get_or_create ADMIN_PIN echo 52235223)"
 
 
@@ -388,8 +392,9 @@ echo ""
 echo "===> [5/8] Mumble Server (VOIP)"
 
 MUMBLE_PORT=64738
-# MUMBLE_SUPERUSER_PW is sourced from the per-unit secrets store near the top
-# of this script (generate-once, persisted). No hardcoded password here.
+# MUMBLE_SUPERUSER_PW is sourced from the secrets store near the top of this
+# script (generate-once, persisted). It defaults to the fixed appliance-wide
+# value 52235223 unless overridden in /etc/nucleus/secrets.
 
 if dpkg -l mumble-server 2>/dev/null | grep -q '^ii'; then
 
