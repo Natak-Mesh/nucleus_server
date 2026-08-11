@@ -108,6 +108,10 @@
   <div class="subtitle">Getting connected and using your ion server.</div>
 </header>
 
+<div class="tip">
+  <strong>Note:</strong> This manual covers the <strong>official TAK Server</strong> variant of the ion server.
+</div>
+
 <h2>About your ion server</h2>
 
 <p>Each ion server is identified as <code>ion-<em>xx</em></code>, where
@@ -134,7 +138,7 @@ LAN or signed into a tailnet.</p>
   <li>Browse to <code>http://&lt;hostname&gt;.local</code> &mdash; for example,
       <code>http://ion-03.local</code> &mdash; or to the AP IP address listed
       on the info sheet shipped with the unit, for example
-      <code>http://10.30.42.1</code>.</li>
+      <code>http://10.30.3.1</code>.</li>
 </ol>
 
 <p>The AP IP address does not depend on mDNS and will always resolve. The web
@@ -217,6 +221,42 @@ web admin interface.</p>
 <code>caCert.p12</code>. Install it on each client device (ATAK / WinTAK), then
 set up the TAK server connection and log in.</p>
 
+<p>Before a client device (EUD) can connect, an operator creates a user account
+on the server and then the EUD enrolls against that account using the
+intermediate CA certificate. The two subsections below cover each side.</p>
+
+<h4>Creating the user (server side)</h4>
+
+<ol>
+  <li>From the TAK Server main screen, go to
+      <strong>Administrative &rarr; Add Users</strong>.</li>
+  <li>In the upper left-hand corner, click <strong>Add User</strong>.</li>
+  <li>Create a username and password &mdash; be sure to read the password
+      requirements shown on that field.</li>
+  <li>There is no need to add a group unless you want something other than the
+      default <code>__ANON__</code> group.</li>
+</ol>
+
+<h4>Setting up the EUD for enrollment</h4>
+
+<ol>
+  <li>Go to <strong>Menu &rarr; Network Preferences &rarr; TAK Servers</strong>.</li>
+  <li>In the upper right corner, tap the <strong>3 dots &rarr; Add</strong>.</li>
+  <li><strong>Name:</strong> whatever you want.</li>
+  <li><strong>Address:</strong> the server address &mdash; pull it from the web
+      UI. Which address you use depends on how you want to reach the server: the
+      AP IP, the Tailscale IP, or the LAN IP.</li>
+  <li>Check <strong>Authentication</strong> and enter the username and password
+      from the server-side user creation.</li>
+  <li>Check <strong>Enroll for Client Certificate</strong>.</li>
+  <li>Check <strong>Enroll with preconfigured trust</strong>.</li>
+  <li>Check <strong>Advanced Options &rarr; Import Trust Store</strong> and select
+      the certificate you downloaded via <strong>Download CA cert</strong> in the
+      web UI. The password is <code>atakatak</code>.</li>
+  <li>Leave the <strong>client cert</strong> area empty.</li>
+  <li>Tap <strong>OK</strong> &mdash; the server should connect.</li>
+</ol>
+
 <h2>Admin Section</h2>
 
 <p>The dashboard has an <strong>Admin</strong> area gated by an operator PIN.
@@ -254,26 +294,107 @@ exposing anything publicly.</p>
 
 <h2>Services</h2>
 
-<p>The server runs several networked services. All are reachable at the
-server's <code>.local</code> hostname (or its IP).</p>
+<p>The server runs several networked services. Reach them at one of the
+server's <strong>IP addresses</strong>:</p>
+<ul>
+  <li>The <strong>AP IP</strong> &mdash; <code>10.30.<em>xx</em>.1</code>, where
+      <em>xx</em> is the unit's serial number. For <code>ion-03</code> that is
+      <code>10.30.3.1</code>. This always works while you are joined to the
+      unit's WiFi.</li>
+  <li>Its <strong>LAN IP</strong> &mdash; shown in the <strong>Network</strong>
+      section of the dashboard.</li>
+  <li>Its <strong>Tailscale IP</strong> (<code>100.x.x.x</code>) &mdash; shown
+      in the Tailscale panel of the Admin area.</li>
+</ul>
+
+<div class="tip">
+  <strong>Use an IP, not <code>.local</code>:</strong> The
+  <code>&lt;hostname&gt;.local</code> name may also work, but
+  <strong>do not use it when saving a server address inside an app</strong>.
+  Many mobile apps do not resolve <code>.local</code> names at all, and they
+  never resolve over Tailscale &mdash; so a saved connection can fail with no
+  obvious reason. Enter an IP address instead.
+</div>
+
+<p>The examples below use <code>10.30.3.1</code> (the AP IP for
+<code>ion-03</code>). Substitute whichever of the server's addresses your
+device can reach.</p>
 
 <h3>MediaMTX &mdash; video streams</h3>
 <p>A place to send and view video streams. Publish once, then pull it back on
 any protocol &mdash; including <strong>into ATAK</strong>, so a feed becomes a
 live video layer for the whole team.</p>
 <ul>
-  <li>Publish: RTSP <code>rtsp://&lt;hostname&gt;.local:8554/&lt;path&gt;</code>
-      or RTMP <code>rtmp://&lt;hostname&gt;.local:1935/&lt;path&gt;</code>.</li>
-  <li>View: HLS <code>http://&lt;hostname&gt;.local:8888</code> or WebRTC
-      <code>http://&lt;hostname&gt;.local:8889</code>; add the RTSP URL as a
-      video source in ATAK.</li>
+  <li>Publish: RTSP <code>rtsp://&lt;server-ip&gt;:8554/&lt;path&gt;</code>
+      &mdash; for example <code>rtsp://10.30.3.1:8554/cam1</code> &mdash; or
+      RTMP <code>rtmp://&lt;server-ip&gt;:1935/&lt;path&gt;</code>.</li>
+  <li>View: HLS <code>http://&lt;server-ip&gt;:8888</code> or WebRTC
+      <code>http://&lt;server-ip&gt;:8889</code> &mdash; for example
+      <code>http://10.30.3.1:8888</code>; add the RTSP URL as a video source in
+      ATAK.</li>
 </ul>
 <p><code>&lt;path&gt;</code> is any name you pick (e.g. <code>cam1</code>);
 use the same path to publish and view.</p>
+<p>Always use an IP address in the RTSP URL you add to ATAK &mdash; a
+<code>.local</code> name will often fail to resolve on the phone or tablet.</p>
+
+<h4>How to publish a stream</h4>
+
+<p>Publish a stream from <strong>OpenTAK ICU</strong>. In its settings:</p>
+<ul>
+  <li><strong>Stream protocol:</strong> RTSP</li>
+  <li><strong>Stream address:</strong> the server IP &mdash; the same one you
+      entered for the server connection. Which address you use depends on how
+      you are connected to the server.</li>
+  <li><strong>Stream port:</strong> default <code>8554</code></li>
+  <li><strong>Path:</strong> whatever you want to call the stream. This example
+      uses <code>mystream</code>.</li>
+  <li>No username or password needed.</li>
+  <li><strong>TCP:</strong> enabled</li>
+</ul>
+
+<h4>Video preferences</h4>
+<ul>
+  <li><strong>Source:</strong> this device's camera</li>
+  <li><strong>Resolution:</strong> whatever you want &mdash; <code>800x600</code>
+      works well most of the time.</li>
+  <li><strong>Bitrate:</strong> <code>1000</code></li>
+  <li><strong>Adaptive bitrate:</strong> on</li>
+  <li><strong>FPS:</strong> <code>15</code></li>
+  <li><strong>Codec:</strong> H264</li>
+</ul>
+
+<h4>Audio settings</h4>
+<ul>
+  <li><strong>Audio enabled:</strong> on</li>
+  <li><strong>Bitrate:</strong> <code>128</code></li>
+  <li><strong>Sample rate:</strong> <code>44100</code></li>
+  <li><strong>Codec:</strong> AAC</li>
+  <li><strong>Stereo</strong>, <strong>echo canceller</strong>, and
+      <strong>noise suppressor</strong>: on</li>
+</ul>
+
+<h4>Adding the stream inside TAK Server</h4>
+<ol>
+  <li>From the TAK Server front page, go to
+      <strong>Menu &rarr; Data &rarr; Video Feed Manager</strong>.</li>
+  <li>Click <strong>Add</strong>.</li>
+  <li><strong>Alias:</strong> whatever you want it labeled as in TAK Server.</li>
+  <li><strong>Protocol:</strong> RTSP</li>
+  <li><strong>Address:</strong> the server address</li>
+  <li><strong>Port:</strong> <code>8554</code></li>
+  <li><strong>Path:</strong> from the EUD &mdash; in this case
+      <code>mystream</code>.</li>
+  <li>Nothing else is required. Hit <strong>Save</strong>.</li>
+</ol>
 
 <h3>Mumble &mdash; voice</h3>
 <p>Voice server to point external apps at. Connect a Mumble client or the
-ATAK Mumble plugin to <code>&lt;hostname&gt;.local:64738</code>.</p>
+ATAK Mumble plugin to <code>&lt;server-ip&gt;:64738</code> &mdash; for example
+<code>10.30.3.1:64738</code>.</p>
+<p>Enter an IP address here, not <code>&lt;hostname&gt;.local</code>. The ATAK
+Mumble plugin and many mobile Mumble clients cannot resolve <code>.local</code>
+names, and the connection will fail without a clear error.</p>
 
 <h3>Reticulum</h3>
 <p>Background mesh networking stack (the <code>rnsd</code> daemon). Carries
@@ -281,8 +402,9 @@ encrypted traffic over the mesh and is what MeshChatX runs on.</p>
 
 <h3>MeshChatX</h3>
 <p>Web app for the Reticulum mesh &mdash; LXMF messaging, network map, and
-page browsing. Open <code>http://&lt;hostname&gt;.local:8000</code>; also
-linked from the dashboard's Services list.</p>
+page browsing. Open <code>http://&lt;server-ip&gt;:8000</code> &mdash; for
+example <code>http://10.30.3.1:8000</code>; also linked from the dashboard's
+Services list.</p>
 
 <footer>
 

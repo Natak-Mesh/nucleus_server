@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Nucleus Configuration Information</title>
+<style>
+@page {
+    size: letter;
+    margin: 0.5in;
+}
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+body {
+    font-family: 'Segoe UI', Arial, sans-serif;
+    font-size: 13px;
+    color: #222;
+    width: 7.5in;
+    min-height: 10in;
+    margin: 0 auto;
+    padding: 0.5in;
+}
+.header {
+    display: flex;
+    align-items: center;
+    border-bottom: 2px solid #222;
+    padding-bottom: 10px;
+    margin-bottom: 20px;
+}
+.header img {
+    height: 55px;
+    margin-right: 18px;
+}
+.header h1 {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+}
+.header .url {
+    margin-left: auto;
+    font-size: 11px;
+    color: #666;
+}
+h2 {
+    font-size: 15px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #333;
+    border-bottom: 1px solid #aaa;
+    padding-bottom: 3px;
+    margin-top: 22px;
+    margin-bottom: 12px;
+}
+.field {
+    font-size: 13px;
+    line-height: 1.4;
+    margin-bottom: 18px;
+    display: flex;
+    align-items: baseline;
+}
+.field strong {
+    min-width: 140px;
+    flex-shrink: 0;
+    color: #444;
+}
+.field .blank {
+    border-bottom: 1px solid #999;
+    flex-grow: 1;
+    min-height: 1em;
+}
+.field code {
+    font-family: monospace;
+    font-size: 12px;
+    background: #e8e8e8;
+    padding: 1px 5px;
+}
+.field-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0 30px;
+}
+.tip {
+    font-size: 12px;
+    color: #555;
+    margin-top: 2px;
+    margin-bottom: 4px;
+    padding: 6px 10px;
+    background: #f5f5f5;
+    border-left: 3px solid #999;
+    line-height: 1.5;
+}
+.tip code {
+    background: #e8e8e8;
+    padding: 1px 5px;
+    font-family: monospace;
+    font-size: 12px;
+}
+table {
+    border-collapse: collapse;
+    font-size: 12px;
+    margin-top: 6px;
+    width: 100%;
+}
+table th, table td {
+    border: 1px solid #bbb;
+    padding: 5px 10px;
+    text-align: left;
+}
+table th {
+    background: #eee;
+    font-weight: 600;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+table code {
+    font-family: monospace;
+    font-size: 11px;
+    background: #e8e8e8;
+    padding: 0 3px;
+}
+.conditional {
+    font-size: 12px;
+    font-style: italic;
+    color: #777;
+    margin-bottom: 6px;
+}
+@media print {
+    @page {
+        margin: 0.5in;
+    }
+    body {
+        padding: 0;
+        width: auto;
+        min-height: auto;
+    }
+    .tip {
+        background: #f5f5f5 !important;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+    table th {
+        background: #eee !important;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+    <img src="NatakMeshsecondary-overlay.png" alt="Natak Mesh">
+    <h1>ion Server Configuration Information</h1>
+    <span class="url">natakmesh.com</span>
+</div>
+
+<h2>Server Information</h2>
+
+<div class="field-row">
+    <div class="field"><strong>Serial Number:</strong> <span class="blank"></span></div>
+    <div class="field"><strong>Server IP:</strong> <span class="blank"></span></div>
+</div>
+<div class="field-row">
+    <div class="field"><strong>SSID:</strong> <code>ion-&lt;xx&gt;</code></div>
+    <div class="field"><strong>AP Password:</strong> <code>52235223</code></div>
+</div>
+<div class="field"><strong>Web UI:</strong> <code>http://ion-&lt;xx&gt;.local</code> or <code>http://&lt;server IP&gt;</code></div>
+<div class="tip">
+    <code>&lt;xx&gt;</code> is the server's serial number with the leading zero
+    dropped. It is <strong>not</strong> zero-padded in the AP IP address &mdash;
+    for example, <code>ion-04</code> (hostname <code>ion-04.local</code>) has the
+    AP IP <code>10.30.4.1</code>, not <code>10.30.04.1</code>.
+</div>
+
+<h2>SSH Credentials</h2>
+
+<div class="field-row">
+    <div class="field"><strong>Hostname:</strong> <code>ion-&lt;xx&gt;.local</code></div>
+    <div class="field"><strong>Username:</strong> <code>natak</code></div>
+</div>
+<div class="field-row">
+    <div class="field"><strong>Password:</strong> <code>52235223</code></div>
+    <div class="field"></div>
+</div>
+<div class="tip">
+    Example: <code>ssh natak@ion-03.local</code>
+</div>
+
+</body>
+</html>
