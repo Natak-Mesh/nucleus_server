@@ -73,12 +73,44 @@ invoking user, logging to `~/ots/logs/`. Plus `nginx`, `rabbitmq-server`,
 
 Encountered on trixie. Check each one.
 
-### 2.1 Silent failure cascade
+### 2.1 Silent failure cascade — the installer deletes its own working directory
 
-Line 37 (`pip install --upgrade pip setuptools wheel`) fails. The script has no
-`set -e`, so it continues to line 38 (`pip3 install opentakserver`), which never
-installs anything. Everything downstream then fails against a venv containing
-only `pip`:
+**Root cause, confirmed on ion-05 with a `set -x` trace.**
+
+The installer `cd`s into a directory and then, on non-Ubuntu systems only,
+deletes that directory while still sitting in it. Every subsequent command runs
+with a working directory that no longer exists, and pip is the first casualty.
+
+The relevant lines, verbatim:
+
+```bash
+INSTALLER_DIR=/tmp/ots_installer     # line 3
+mkdir -p $INSTALLER_DIR              # line 4
+cd $INSTALLER_DIR                    # line 5   <-- shell enters the directory
+
+if [ "$NAME" != "Ubuntu" ]           # line 12
+then
+  read -p "...run anyway? [y/N]" confirm < /dev/tty && [[ ... ]] || exit 1
+  rm -fr $INSTALLER_DIR              # line 17  <-- deletes the cwd out from under itself
+fi
+```
+
+Answer `y` at that prompt and the shell's cwd becomes an unlinked inode. Bash
+itself does not care. Python does — `pip` resolves `os.getcwd()` during startup:
+
+```
++ line 39: python3 -m pip install --upgrade pip setuptools wheel
+Traceback (most recent call last):
+  File "/home/natak/.opentakserver_venv/lib/python3.13/site-packages/pip/__main__.py", line 8, in <module>
+    if sys.path[0] in ("", os.getcwd()):
+                           ~~~~~~~~~^^
+FileNotFoundError: [Errno 2] No such file or directory
++ line 40: pip3 install opentakserver
+ERROR: Could not install packages due to an OSError: [Errno 2] No such file or directory
+```
+
+Both pip invocations die. The venv is left containing only `pip`, so everything
+downstream fails:
 
 ```
 cd: ~/.opentakserver_venv/lib/python3.*/site-packages/opentakserver: No such file or directory
@@ -86,6 +118,58 @@ flask: command not found
 ```
 
 No config, no CA, no database schema, no working install.
+
+**Why only Debian.** Line 17 lives inside the `!= "Ubuntu"` branch. On Ubuntu it
+never executes, the cwd stays valid, and the installer works. The bug is
+unreachable on the only platform the vendor tests.
+
+**Why it looks like a pip bug and isn't.** Re-running the same pip command by
+hand (section 3.1) always succeeds, because your shell is in a directory that
+exists. Nothing is wrong with pip, the venv, PEP 668, or
+`--system-site-packages`. Two theories worth killing explicitly, both tested and
+both wrong:
+
+- *`curl | bash` stdin consumption.* Piping does let stdin-reading commands
+  (like `apt`) swallow unexecuted script text. Real bash behaviour, but not what
+  happens here — the `set -x` trace shows lines 39 and 40 **executing** and
+  failing, not being skipped.
+- *`apt upgrade` swapping the interpreter mid-run.* Unrelated. The trace shows
+  apt completing normally long before the failure.
+
+**Fix — one line.** Download the installer first:
+
+```bash
+curl -s -L https://i.opentakserver.io/ubuntu_installer -o /tmp/ots_installer.sh
+```
+
+Patch the non-Ubuntu branch so the shell leaves the doomed directory:
+
+```bash
+  rm -fr $INSTALLER_DIR
+  cd /tmp          # <-- add this line
+```
+
+Run it as a file, never piped:
+
+```bash
+bash /tmp/ots_installer.sh
+```
+
+**Recommended: trace the run.** The failure mode is silent, so capture a
+transcript with line numbers. This is what identified the bug:
+
+```bash
+sed -i '1a set -x' /tmp/ots_installer.sh
+sed -i "2a PS4='+ line \${LINENO}: '" /tmp/ots_installer.sh
+script -q -e -c "bash /tmp/ots_installer.sh" /tmp/ots_install.log
+```
+
+Every executed line appears in `/tmp/ots_install.log` prefixed with its number,
+which distinguishes "ran and failed" from "never ran" — the exact ambiguity that
+made this bug hard to find.
+
+With the patch applied, 2.2, 2.3 and 2.5-reason-1 below do not occur. 2.4
+(`lastversion`) is independent and still applies.
 
 ### 2.2 The success message is a lie
 
